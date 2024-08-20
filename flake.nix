@@ -9,6 +9,12 @@
       type = "git";
       submodules = true;
     };
+    freertos = {
+      flake = false;
+      url = "https://github.com/raspberrypi/FreeRTOS-Kernel";
+      type = "git";
+      submodules = true;
+    };
   };
 
   outputs = { nixpkgs, flake-utils, ... }@inputs:
@@ -21,6 +27,7 @@
       {
         devShells.default = pkgs.mkShell {
           nativeBuildInputs = with pkgs; [
+            pkgsi686Linux.glibc
             gcc-arm-embedded
             cmake
             python3
@@ -40,6 +47,7 @@
             export PIOASM_HINT="${pkgs.pioasm}/bin"
             export PICOTOOL_DIR="${pkgs.picotool}/bin"
             export PIOASM_DIR="${pkgs.pioasm}/bin"
+            export FREERTOS_KERNEL_PATH="${inputs.freertos}"
           '';
         };
       }
