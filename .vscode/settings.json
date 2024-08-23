@@ -1,5 +1,41 @@
 {
-  "files.associations": {
-    "compiler.h": "c"
-  }
+    "cmake.options.statusBarVisibility": "hidden",
+    "cmake.options.advanced": {
+        "build": {
+            "statusBarVisibility": "hidden"
+        },
+        "launch": {
+            "statusBarVisibility": "hidden"
+        },
+        "debug": {
+            "statusBarVisibility": "hidden"
+        }
+    },
+    "cmake.configureOnEdit": false,
+    "cmake.automaticReconfigure": false,
+    "cmake.configureOnOpen": false,
+    "cmake.generator": "Ninja",
+    "cmake.cmakePath": "${userHome}/.pico-sdk/cmake/v3.28.6/bin/cmake",
+    "C_Cpp.debugShortcut": false,
+    "terminal.integrated.env.windows": {
+        "PICO_SDK_PATH": "${workspaceFolder}/pico-sdk",
+    },
+    "terminal.integrated.env.osx": {
+        "PICO_SDK_PATH": "${workspaceFolder}/pico-sdk",
+    },
+    "terminal.integrated.env.linux": {
+        "PICO_SDK_PATH": "${workspaceFolder}/pico-sdk",
+    },
+    "raspberry-pi-pico.cmakeAutoConfigure": true,
+    "raspberry-pi-pico.useCmakeTools": false,
+    "files.associations": {
+        "stdlib.h": "c",
+        "lualib.h": "c",
+        "sdcard.h": "c",
+        "freertos.h": "c",
+        "multicore.h": "c",
+        "spi.h": "c",
+        "stdio.h": "c",
+        "task.h": "c"
+    }
 }

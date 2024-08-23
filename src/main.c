@@ -1,7 +1,8 @@
 #include <stdio.h>
 
-#include "pico/multicore.h"
 #include "pico/stdlib.h"
+#include "hardware/gpio.h"
+// #include "pico/multicore.h"
 
 #ifdef CYW43_WL_GPIO_LED_PIN
 #include "pico/cyw43_arch.h"
@@ -9,6 +10,12 @@
 
 #include "FreeRTOS.h"
 #include "task.h"
+
+#include "lua.h"
+#include "lauxlib.h"
+#include "lualib.h"
+
+#include "sdcard.h"
 
 // Which core to run on if configNUMBER_OF_CORES==1
 #ifndef RUN_FREE_RTOS_ON_CORE
@@ -26,13 +33,15 @@
 #endif
 
 // Delay between led blinking
-#define LED_DELAY_MS 50
+#define LED_DELAY_MS 1000
 
 // Priorities of our threads - higher numbers are higher priority
+#define SDCARD_TASK_PRIORITY (tskIDLE_PRIORITY + 3UL)
 #define MAIN_TASK_PRIORITY (tskIDLE_PRIORITY + 2UL)
 #define BLINK_TASK_PRIORITY (tskIDLE_PRIORITY + 1UL)
 
 // Stack sizes of our threads in words (4 bytes)
+#define SDCARD_TASK_STACK_SIZE configMINIMAL_STACK_SIZE
 #define MAIN_TASK_STACK_SIZE configMINIMAL_STACK_SIZE
 #define BLINK_TASK_STACK_SIZE configMINIMAL_STACK_SIZE
 
@@ -52,17 +61,10 @@ static void pico_init_led(void)
 
 void blink_task(__unused void *params)
 {
-  bool on = false;
-  printf("blink_task starts\n");
+  bool on = true;
   pico_init_led();
   while (true)
   {
-    static int last_core_id = -1;
-    if (portGET_CORE_ID() != last_core_id)
-    {
-      last_core_id = portGET_CORE_ID();
-      printf("blink task is on core %d\n", last_core_id);
-    }
     pico_set_led(on);
     on = !on;
 
@@ -125,11 +127,96 @@ void stats_task(__unused void *params)
   }
 }
 
+// demo function that sets the led with a boolean value
+// that should be called from lua
+int set_led(lua_State *L)
+{
+  if (!lua_isboolean(L, 1))
+  {
+    luaL_error(L, "Expected boolean");
+    return 0;
+  }
+  if (lua_toboolean(L, 1))
+  {
+    pico_set_led(true);
+  }
+  else
+  {
+    pico_set_led(false);
+  }
+
+  printf("Led set by lua!\n");
+  return 0;
+}
+
+int toggle_led(lua_State *L)
+{
+  bool led_status = gpio_get(PICO_DEFAULT_LED_PIN);
+  pico_set_led(!led_status);
+  printf("Led toggled by lua!\n");
+  return 0;
+}
+
+int curtime(lua_State *L)
+{
+  uint32_t time = to_ms_since_boot(get_absolute_time());
+  lua_pushinteger(L, time);
+  return 1;
+}
+
+void lua_task(__unused void *params)
+{
+  sleep_ms(2000);
+
+  lua_State *L = luaL_newstate();
+  if (L == NULL)
+  {
+    printf("Failed to initialize lua state\n");
+    goto endnolua;
+  }
+  printf("The lua state is at %p\n", L);
+
+  // Init only the base library, since we're running in an embedded environment
+  luaL_requiref(L, "_G", luaopen_base, 1);
+  lua_pop(L, 1);
+
+  pico_init_led();
+  // explose our function to lua
+  lua_register(L, "set_led", set_led);
+  lua_register(L, "toggle_led", toggle_led);
+  lua_register(L, "curtime", curtime);
+
+  char input[64];
+  // REPL
+  while (true)
+  {
+    printf("> ");
+    fflush(stdout);
+    scanf("%64s", input);
+    printf("\n> %s\n", input);
+
+    if (luaL_loadstring(L, input) || lua_pcall(L, 0, 0, 0))
+    {
+      printf("%s\n", luaL_tolstring(L, -1, NULL));
+      lua_pop(L, 1);
+    }
+    else
+    {
+      printf("OK\n");
+    }
+  }
+
+end:
+  lua_close(L);
+endnolua:
+  vTaskDelete(NULL);
+}
+
 void vLaunch(void)
 {
-  TaskHandle_t task;
-  xTaskCreate(main_task, "MainThread", MAIN_TASK_STACK_SIZE, NULL,
-              MAIN_TASK_PRIORITY, &task);
+  // TaskHandle_t task;
+  // xTaskCreate(main_task, "MainThread", MAIN_TASK_STACK_SIZE, NULL,
+  //             MAIN_TASK_PRIORITY, &task);
 
 #if USE_LED
   // start the led blinking
@@ -137,8 +224,14 @@ void vLaunch(void)
               BLINK_TASK_PRIORITY, NULL);
 #endif
 
-  xTaskCreate(stats_task, "StatsThread", configMINIMAL_STACK_SIZE, NULL,
-              tskIDLE_PRIORITY, NULL);
+  // xTaskCreate(stats_task, "StatsThread", configMINIMAL_STACK_SIZE, NULL,
+  //             tskIDLE_PRIORITY, NULL);
+
+  xTaskCreate(lua_task, "LuaThread", MAIN_TASK_STACK_SIZE, NULL,
+              MAIN_TASK_PRIORITY, NULL);
+
+  xTaskCreate(vSdcardTask, "SdcardThread", SDCARD_TASK_STACK_SIZE, NULL,
+              SDCARD_TASK_PRIORITY, NULL);
 
   /* Start the tasks and timer running. */
   vTaskStartScheduler();
@@ -147,7 +240,10 @@ void vLaunch(void)
 int main(void)
 {
   stdio_init_all();
-  sleep_ms(2000);
+
+  // Wait for serial monitor on my PC to pick up
+  sleep_ms(2500);
+
   vLaunch();
   return 0;
 }

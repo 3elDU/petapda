@@ -18,24 +18,6 @@
         "type": "github"
       }
     },
-    "freertos": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1723126959,
-        "narHash": "sha256-sWO+gtPfiEHFitXYxYDYzFeZyXH3k+4gupYznVJJGPg=",
-        "ref": "refs/heads/main",
-        "rev": "4f7299d6ea746b27a9dd19e87af568e34bd65b15",
-        "revCount": 3483,
-        "submodules": true,
-        "type": "git",
-        "url": "https://github.com/raspberrypi/FreeRTOS-Kernel"
-      },
-      "original": {
-        "submodules": true,
-        "type": "git",
-        "url": "https://github.com/raspberrypi/FreeRTOS-Kernel"
-      }
-    },
     "nixpkgs": {
       "locked": {
         "lastModified": 1724058148,
@@ -51,30 +33,10 @@
         "type": "github"
       }
     },
-    "pico-sdk": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1723125278,
-        "narHash": "sha256-fVSpBVmjeP5pwkSPhhSCfBaEr/FEtA82mQOe/cHFh0A=",
-        "ref": "refs/heads/master",
-        "rev": "efe2103f9b28458a1615ff096054479743ade236",
-        "revCount": 828,
-        "submodules": true,
-        "type": "git",
-        "url": "https://github.com/raspberrypi/pico-sdk"
-      },
-      "original": {
-        "submodules": true,
-        "type": "git",
-        "url": "https://github.com/raspberrypi/pico-sdk"
-      }
-    },
     "root": {
       "inputs": {
         "flake-utils": "flake-utils",
-        "freertos": "freertos",
-        "nixpkgs": "nixpkgs",
-        "pico-sdk": "pico-sdk"
+        "nixpkgs": "nixpkgs"
       }
     },
     "systems": {

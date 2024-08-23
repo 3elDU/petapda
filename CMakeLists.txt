@@ -7,7 +7,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # Load environment variables
-set(PICO_SDK_PATH $ENV{PICO_SDK_PATH})
+set(PICO_SDK_PATH ${CMAKE_CURRENT_LIST_DIR}/pico-sdk)
 set(PICO_TOOLCHAIN_PATH $ENV{PICO_TOOLCHAIN_PATH})
 set(CMAKE_C_COMPILER "${PICO_TOOLCHAIN_PATH}/arm-none-eabi-gcc")
 set(CMAKE_CXX_COMPILER "${PICO_TOOLCHAIN_PATH}/arm-none-eabi-g++")
@@ -24,16 +24,26 @@ project(tinyos C CXX ASM)
 pico_sdk_init()
 
 # Include FreeRTOS
-set(FREERTOS_KERNEL_PATH $ENV{FREERTOS_KERNEL_PATH})
+set(FREERTOS_KERNEL_PATH ${CMAKE_CURRENT_LIST_DIR}/FreeRTOS)
 set(FREERTOS_KERNEL_RP2040_RELATIVE_PATH "portable/ThirdParty/GCC/RP2040")
 add_subdirectory(${FREERTOS_KERNEL_PATH}/${FREERTOS_KERNEL_RP2040_RELATIVE_PATH} FREERTOS_KERNEL)
 
+# Include lua
+add_subdirectory(lua)
+
 add_executable(main
-    main.c
+    src/main.c
+    src/sdcard.c
+    src/debug.c
 )
 
-# Include FreeRTOS config
-target_include_directories(main PRIVATE ${CMAKE_CURRENT_LIST_DIR})
+target_include_directories(main PUBLIC
+    ${CMAKE_CURRENT_LIST_DIR}/src
+)
+
+target_include_directories(main PRIVATE 
+    ${CMAKE_CURRENT_LIST_DIR}
+)
 
 pico_enable_stdio_usb(main 1)
 pico_enable_stdio_uart(main 0)
@@ -43,6 +53,8 @@ target_link_libraries(main
     pico_async_context_freertos
     FreeRTOS-Kernel-Heap4
     pico_stdlib
+    hardware_spi
+    lua_static
 )
 
 pico_add_extra_outputs(main)
