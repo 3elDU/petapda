@@ -36,6 +36,7 @@
         "multicore.h": "c",
         "spi.h": "c",
         "stdio.h": "c",
-        "task.h": "c"
+        "task.h": "c",
+        "lprefix.h": "c"
     }
 }
