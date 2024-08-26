@@ -14,6 +14,17 @@
 
 static uint8_t CRCTable[256];
 
+static bool sdcard_initialized = false;
+static bool use_block_adressing = true; // If true, use block addressing (1 block - 512 bytes), otherwise use byte addressing
+
+static inline uint32_t sd_transform_address(uint32_t address)
+{
+  if (use_block_adressing)
+    return address;
+  else
+    return address * SDCARD_BLOCK_SIZE;
+}
+
 // Generate the CRC7 lookup table
 void gen_crc_table()
 {
@@ -47,6 +58,31 @@ uint8_t get_crc(uint8_t message[], uint32_t length)
   for (uint32_t i = 0; i < length; ++i)
   {
     crc = crc_add(crc, message[i]);
+  }
+
+  return crc;
+}
+
+uint16_t crc16_ccitt(const uint8_t *data, size_t length)
+{
+  uint16_t crc = 0x0000;        // Initial value
+  uint16_t polynomial = 0x1021; // Polynomial
+
+  for (size_t i = 0; i < length; i++)
+  {
+    crc ^= (uint16_t)data[i] << 8; // Apply byte to CRC
+
+    for (uint8_t bit = 0; bit < 8; bit++)
+    {
+      if (crc & 0x8000)
+      {
+        crc = (crc << 1) ^ polynomial;
+      }
+      else
+      {
+        crc = crc << 1;
+      }
+    }
   }
 
   return crc;
@@ -93,16 +129,46 @@ int sdcard_exec_cmd(sd_card_command cmd, uint32_t arg, bool is_cmd)
   return 0;
 }
 
-bool sdcard_read_single_block(uint32_t block, uint8_t *dst)
+// Execute a command and receive an R1 response
+// Handles busy state automatically
+R1 sdcard_exec_cmd_r1(sd_card_command cmd, uint32_t arg, bool is_cmd)
 {
-  sdcard_exec_cmd(SD_CMD_READ_SINGLE_BLOCK, block, false);
+  sdcard_exec_cmd(cmd, arg, is_cmd);
 
   R1 r1;
-  spi_read_blocking(SDCARD_SPI, 0xFF, (uint8_t *)&r1, 1);
-
-  if (*((uint8_t *)&r1) != 0x00)
+  uint32_t cycles = 0;
+  do
   {
+    spi_read_blocking(SDCARD_SPI, 0xFF, (uint8_t *)&r1, 1);
+    cycles++;
+  } while (*(uint8_t *)&r1 == 0xFF); // Sometimes SD card sends 0xFF's when it's still busy
+  if (cycles > 1)
+    printf("sdcard_exec_cmd_r1() took %u cycles\n", cycles);
+
+  return r1;
+}
+
+bool sdcard_read_single_block(uint32_t block, uint8_t *dst)
+{
+  block = sd_transform_address(block);
+  printf("sdcard_read_single_block(%u, %p)\n", block, dst);
+
+  uint8_t tries = 0;
+
+retry:
+  if (tries == SDCARD_TIMEOUT_RETRIES)
+  {
+    printf("  - too much retries\n");
     return false;
+  }
+
+  R1 r1 = sdcard_exec_cmd_r1(SD_CMD_READ_SINGLE_BLOCK, block, false);
+
+  if (!sd_is_good_r1(r1))
+  {
+    printf("  - invalid r1 response 0x%02x\n", *((uint8_t *)&r1));
+    tries++;
+    goto retry;
   }
 
   // Wait until the SD card responds with 0xFE (block start token)
@@ -112,18 +178,146 @@ bool sdcard_read_single_block(uint32_t block, uint8_t *dst)
   {
     spi_read_blocking(SDCARD_SPI, 0xFF, &byte, 1);
     cycles++;
-  } while (byte != 0xFE && cycles < 100000);
+    if (byte != 0xFF && byte != 0xFE && byte != 0x00)
+      printf("  - byte 0x%02X\n", byte);
+  } while (byte != 0xFE && cycles < SDCARD_READ_RESPONSE_CYCLES);
 
   if (byte != 0xFE)
   {
-    return false;
+    printf("  - response timeout, try #%d\n", tries + 1, byte);
+    tries++;
+    goto retry;
   }
 
-  spi_read_blocking(SDCARD_SPI, 0xFF, dst, 512);
+  spi_read_blocking(SDCARD_SPI, 0xFF, dst, SDCARD_BLOCK_SIZE);
+  printf("  - success\n");
   return true;
 }
 
-void vSdcardTask(void *pvParameters)
+bool sdcard_read_multiple_blocks(uint32_t block, uint8_t *dst, uint32_t count)
+{
+  block = sd_transform_address(block);
+  printf("sdcard_read_multiple_blocks(%u, %p, %u)\n", block, dst, count);
+
+  uint8_t tries = 0;
+
+retry:
+  if (tries > SDCARD_TIMEOUT_RETRIES)
+  {
+    printf("  - too much retries\n");
+    return false;
+  }
+
+  R1 r1 = sdcard_exec_cmd_r1(SD_CMD_READ_MULTIPLE_BLOCK, block, false);
+
+  if (!sd_is_good_r1(r1))
+  {
+    printf("  - invalid r1 response 0x%02x\n", *((uint8_t *)&r1));
+    tries++;
+    goto retry;
+  }
+
+  uint32_t blocks_read = 0;
+  do
+  {
+    uint8_t byte;
+    uint32_t cycles = 0;
+
+    do
+    {
+      spi_read_blocking(SDCARD_SPI, 0xFF, &byte, 1);
+      cycles++;
+    } while (byte != 0xFE && cycles < SDCARD_READ_RESPONSE_CYCLES); // Wait for the block start token
+
+    if (byte != 0xFE)
+    {
+      printf("  - response timeout, try #%d, byte 0x%02x\n", tries + 1, byte);
+      tries++;
+      goto retry;
+    }
+
+    spi_read_blocking(SDCARD_SPI, 0xFF, dst + blocks_read * SDCARD_BLOCK_SIZE, SDCARD_BLOCK_SIZE);
+
+    uint16_t crc;
+    spi_read_blocking(SDCARD_SPI, 0xFF, (uint8_t *)&crc, 2); // CRC bytes
+    uint16_t dst_crc = crc16_ccitt(dst + blocks_read * SDCARD_BLOCK_SIZE, SDCARD_BLOCK_SIZE);
+    if (crc != dst_crc)
+    {
+      printf(" - crc doesn't match, %04x on our side, %04x on card\n", crc, crc16_ccitt(dst + blocks_read * SDCARD_BLOCK_SIZE, SDCARD_BLOCK_SIZE));
+      tries++;
+      goto retry;
+    }
+
+    blocks_read++;
+  } while (blocks_read < count);
+
+  sdcard_exec_cmd(SD_CMD_STOP_TRANSMISSION, 0, false);
+  printf("  - success, read %d blocks\n", blocks_read);
+  return true;
+}
+
+bool sdcard_write_single_block(uint32_t block, const uint8_t *src)
+{
+  block = sd_transform_address(block);
+  printf("sdcard_write_single_block(%u, %p)\n", block, src);
+
+  uint8_t tries = 0;
+
+retry:
+  if (tries == SDCARD_TIMEOUT_RETRIES)
+  {
+    printf("  - too much retries\n");
+    return false;
+  }
+
+  R1 r1 = sdcard_exec_cmd_r1(SD_CMD_WRITE_BLOCK, block, false);
+
+  if (!sd_is_good_r1(r1))
+  {
+    printf("  - invalid r1 response 0x%02x, in_idle_state=%d\n", *(uint8_t *)&r1, r1.in_idle_state);
+    tries++;
+    goto retry;
+  }
+
+  // Send start block token 0xFE
+  uint8_t response = 0xFE; // Reuse response variable
+  spi_write_blocking(SDCARD_SPI, &response, 1);
+
+  // Send the data block
+  spi_write_blocking(SDCARD_SPI, src, SDCARD_BLOCK_SIZE);
+
+  // Send CRC
+  uint16_t crc = crc16_ccitt(src, SDCARD_BLOCK_SIZE);
+  uint8_t crc_bytes[2] = {(crc >> 8) & 0xFF, crc & 0xFF};
+  spi_write_blocking(SDCARD_SPI, crc_bytes, 2);
+
+  // Read the data response token
+  uint32_t cycles = 0;
+  do
+  {
+    spi_read_blocking(SDCARD_SPI, 0xFF, &response, 1);
+    cycles++;
+    if (response != 0xFF && response != 0xE5 && response != 0x00)
+      printf("  - byte 0x%02X\n", response);
+  } while (response != 0xE5 && cycles < SDCARD_WRITE_RESPONSE_CYCLES);
+
+  if (response == 0xFF)
+  {
+    printf("  - response timeout, try #%d\n", tries + 1);
+    tries++;
+    goto retry;
+  }
+
+  printf("  - success, response 0x%02x\n", response);
+  return true;
+}
+
+bool sdcard_status()
+{
+  return sdcard_initialized;
+}
+
+bool sdcard_init()
 {
   gen_crc_table();
 
@@ -147,6 +341,13 @@ void vSdcardTask(void *pvParameters)
   printf("SPI Initialized!\n");
 
 begin_init:
+  uint8_t tries = 0;
+  if (tries > 10)
+  {
+    printf("Failed to initialize SD card\n");
+    return false;
+  }
+
   // SD Card initialization
   spi_read_blocking(SDCARD_SPI, 0xFF, NULL, 16); // Send 16 dummy bytes
 
@@ -161,11 +362,13 @@ begin_init:
   if (cycles >= 1000)
   {
     printf("SD_CMD_GO_IDLE_STATE timed out\n");
+    tries++;
     goto begin_init;
   }
 
   printf("Received 0x01 from SDCard after %d cycles! Proceeding with initialization\n", cycles);
 
+mid_init:
   sdcard_exec_cmd(SD_CMD_SEND_IF_COND, 0x000001AA, false);
   spi_read_blocking(SDCARD_SPI, 0xFF, response, 5);
 
@@ -194,15 +397,17 @@ begin_init:
   if (cycles >= 1000)
   {
     printf("SD_ACMD_SD_SEND_OP_COND timed out\n");
+    tries++;
     goto begin_init;
   }
 
   printf("SP_ACMD_SD_SEND_OP_COND success, in_idle_state=%x\n", response[0]);
 
   sdcard_exec_cmd(SD_CMD_READ_OCR, 0x0, false);
-  spi_read_blocking(SDCARD_SPI, 0xFF, (uint8_t *)&r7, 5);
+  spi_read_blocking(SDCARD_SPI, 0xFF, (uint8_t *)&r7, sizeof(R7));
   printf("in_idle_state=%d\n", r7.r1.in_idle_state);
   printf("card_capacity_status=%d\n", r7.ocr.card_capacity_status);
+  use_block_adressing = r7.ocr.card_capacity_status;
   if (r7.ocr.card_capacity_status)
   {
     printf("  we have an SDHC/SDXC (2-32GB)/(32GB-2TB) Card\n");
@@ -213,10 +418,7 @@ begin_init:
   }
   printf("card_power_up_status=%d\n", r7.ocr.card_power_up_status);
 
-  if (r7.ocr.card_power_up_status)
-  {
-    printf("SDCard fully initialized!\n");
-  }
+  printf("SDCard fully initialized!\n");
 
   // Increase bus speed
   uint actual_baudrate = spi_set_baudrate(SDCARD_SPI, 13 * 1000 * 1000);
@@ -225,7 +427,7 @@ begin_init:
   // Read CID (Card IDentification) register
   sdcard_exec_cmd(SD_CMD_SEND_CID, 0x0, false);
   CID cid;
-  spi_read_blocking(SDCARD_SPI, 0xFF, (uint8_t *)&cid, 17);
+  spi_read_blocking(SDCARD_SPI, 0xFF, (uint8_t *)&cid, sizeof(CID));
   printf("CID\n");
   printf("  serial_number=%u\n", cid.serial_number);
   printf("  product_name=%5s\n", cid.product_name);
@@ -233,35 +435,12 @@ begin_init:
   printf("  product_revision=%u\n", cid.revision);
   printf("  manufacturing_date=%0x\n", cid.manufacturing_date);
 
-  // Set block length to 512 bytes
-  sdcard_exec_cmd(SD_CMD_SET_BLOCKLEN, 0x200, false);
+  // Set block length
+  sdcard_exec_cmd(SD_CMD_SET_BLOCKLEN, SDCARD_BLOCK_SIZE, false);
   R1 r1;
   spi_read_blocking(SDCARD_SPI, 0xFF, (uint8_t *)&r1, sizeof(R1));
   printf("r1 %x\n", r1);
 
-  // Try to read a block
-  uint8_t *block = pvPortMalloc(512);
-  if (block == NULL)
-  {
-    printf("Failed to allocate memory for reading a block\n");
-    goto end;
-  }
-
-  // Read the boot sector
-  if (!sdcard_read_single_block(0, block))
-  {
-    printf("Failed to read boot sector\n");
-    goto end;
-  }
-
-  if (block[510] != 0x55 || block[511] != 0xAA)
-  {
-    printf("Invalid boot sector\n");
-    goto end;
-  }
-
-  printf("Read valid boot sector from an SD card. Can continue with the file system\n");
-
-end:
-  vTaskDelete(NULL);
+  sdcard_initialized = true;
+  return true;
 }

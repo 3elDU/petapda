@@ -15,7 +15,8 @@
 #include "lauxlib.h"
 #include "lualib.h"
 
-#include "sdcard.h"
+#include "fs/ff.h"
+#include "fs/diskio.h"
 
 // Which core to run on if configNUMBER_OF_CORES==1
 #ifndef RUN_FREE_RTOS_ON_CORE
@@ -36,12 +37,10 @@
 #define LED_DELAY_MS 1000
 
 // Priorities of our threads - higher numbers are higher priority
-#define SDCARD_TASK_PRIORITY (tskIDLE_PRIORITY + 3UL)
 #define MAIN_TASK_PRIORITY (tskIDLE_PRIORITY + 2UL)
 #define BLINK_TASK_PRIORITY (tskIDLE_PRIORITY + 1UL)
 
 // Stack sizes of our threads in words (4 bytes)
-#define SDCARD_TASK_STACK_SIZE configMINIMAL_STACK_SIZE
 #define MAIN_TASK_STACK_SIZE configMINIMAL_STACK_SIZE
 #define BLINK_TASK_STACK_SIZE configMINIMAL_STACK_SIZE
 
@@ -212,6 +211,57 @@ endnolua:
   vTaskDelete(NULL);
 }
 
+void test_fs_task(void *pvParameters)
+{
+  sleep_ms(2500);
+
+  FATFS fs;
+  FRESULT fr;
+
+  fr = f_mount(&fs, "SD", 1);
+  if (fr != FR_OK)
+  {
+    printf("Failed to mount fs: %d\n", fr);
+    goto end;
+  }
+  else
+  {
+    uint32_t free_clusters;
+    f_getfree("SD", &free_clusters, NULL);
+    float free_mb = free_clusters * FF_MIN_SS * fs.csize / 1048576.0;
+    printf("Filesystem mounted, %f free MiB\n", free_mb);
+  }
+
+  FIL file;
+  UINT bytes_written;
+  fr = f_open(&file, "hello-from-pico.txt", FA_WRITE | FA_CREATE_ALWAYS);
+  if (fr != FR_OK)
+  {
+    printf("Failed to open file: %d\n", fr);
+    goto unmount;
+  }
+
+  const TCHAR string[] = "Hello from Raspberry Pi Pico!\n";
+  fr = f_write(&file, string, sizeof(string), &bytes_written);
+  if (fr != FR_OK)
+  {
+    printf("Failed to write to file: %d\n", fr);
+    goto close;
+  }
+
+  printf("Wrote %u bytes to file\n", bytes_written);
+  f_sync(&file);
+
+close:
+  f_close(&file);
+unmount:
+  fr = f_unmount("SD");
+  printf("filesystem unmount result = %d\n", fr);
+end:
+  fflush(stdout);
+  vTaskDelete(NULL);
+}
+
 void vLaunch(void)
 {
   // TaskHandle_t task;
@@ -230,8 +280,8 @@ void vLaunch(void)
   xTaskCreate(lua_task, "LuaThread", MAIN_TASK_STACK_SIZE, NULL,
               MAIN_TASK_PRIORITY, NULL);
 
-  xTaskCreate(vSdcardTask, "SdcardThread", SDCARD_TASK_STACK_SIZE, NULL,
-              SDCARD_TASK_PRIORITY, NULL);
+  xTaskCreate(test_fs_task, "FsThread", MAIN_TASK_STACK_SIZE * 4, NULL,
+              MAIN_TASK_PRIORITY + 1, NULL);
 
   /* Start the tasks and timer running. */
   vTaskStartScheduler();

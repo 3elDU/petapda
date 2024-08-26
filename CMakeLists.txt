@@ -35,6 +35,10 @@ add_executable(main
     src/main.c
     src/sdcard.c
     src/debug.c
+    src/fs/diskio.c
+    src/fs/ff.c
+    src/fs/ffsystem.c
+    src/fs/ffunicode.c
 )
 
 target_include_directories(main PUBLIC
