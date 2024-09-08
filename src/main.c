@@ -18,6 +18,8 @@
 #include "fs/ff.h"
 #include "fs/diskio.h"
 
+#include "7segment/7segment.h"
+
 // Which core to run on if configNUMBER_OF_CORES==1
 #ifndef RUN_FREE_RTOS_ON_CORE
 #define RUN_FREE_RTOS_ON_CORE 0
@@ -165,7 +167,7 @@ int curtime(lua_State *L)
 
 void lua_task(__unused void *params)
 {
-  sleep_ms(2000);
+  sleep_ms(3000);
 
   lua_State *L = luaL_newstate();
   if (L == NULL)
@@ -211,7 +213,7 @@ endnolua:
   vTaskDelete(NULL);
 }
 
-void test_fs_task(void *pvParameters)
+void test_fs_task(__unused void *pvParameters)
 {
   sleep_ms(2500);
 
@@ -277,11 +279,14 @@ void vLaunch(void)
   // xTaskCreate(stats_task, "StatsThread", configMINIMAL_STACK_SIZE, NULL,
   //             tskIDLE_PRIORITY, NULL);
 
-  xTaskCreate(lua_task, "LuaThread", MAIN_TASK_STACK_SIZE, NULL,
+  xTaskCreate(lua_task, "LuaThread", MAIN_TASK_STACK_SIZE * 8, NULL,
               MAIN_TASK_PRIORITY, NULL);
 
   xTaskCreate(test_fs_task, "FsThread", MAIN_TASK_STACK_SIZE * 4, NULL,
               MAIN_TASK_PRIORITY + 1, NULL);
+
+  // xTaskCreate(vSevenSegmentDisplayTask, "7SegmentDisplayThread", MAIN_TASK_STACK_SIZE, NULL,
+  //             tskIDLE_PRIORITY, NULL);
 
   /* Start the tasks and timer running. */
   vTaskStartScheduler();

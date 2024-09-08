@@ -40,6 +40,7 @@ add_executable(main
     src/fs/ffsystem.c
     src/fs/ffunicode.c
     src/st7789/st7789.c
+    src/7segment/7segment.c
 )
 
 target_include_directories(main PUBLIC

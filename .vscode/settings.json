@@ -37,6 +37,7 @@
         "spi.h": "c",
         "stdio.h": "c",
         "task.h": "c",
-        "lprefix.h": "c"
+        "lprefix.h": "c",
+        "7segment.h": "c"
     }
 }
