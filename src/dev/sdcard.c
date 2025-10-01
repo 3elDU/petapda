@@ -1,21 +1,17 @@
 // Sd-card communication
 
 #include "sdcard.h"
-#include "debug.h"
 
-#include <stdio.h>
-#include "pico/binary_info.h"
-#include "pico/time.h"
-#include "hardware/spi.h"
-#include "hardware/gpio.h"
+#include <sys/bus.h>
 
-#include "FreeRTOS.h"
-#include "task.h"
+#include <pico/printf.h>
+#include <pico/time.h>
+#include <hardware/gpio.h>
 
 static uint8_t CRCTable[256];
 
-static bool sdcard_initialized = false;
-static bool use_block_adressing = true; // If true, use block addressing (1 block - 512 bytes), otherwise use byte addressing
+bool sdcard_initialized = false;
+bool use_block_adressing = true; // If true, use block addressing (1 block - 512 bytes), otherwise use byte addressing
 
 static inline uint32_t sd_transform_address(uint32_t address)
 {
@@ -99,8 +95,6 @@ void chip_deselect()
   gpio_put(SDCARD_CS_PIN, 1);
 }
 
-static bool high_baud_rate = false;
-
 int sdcard_exec_cmd(sd_card_command cmd, uint32_t arg, bool is_cmd)
 {
   uint8_t CRC = 0xff;
@@ -120,11 +114,15 @@ int sdcard_exec_cmd(sd_card_command cmd, uint32_t arg, bool is_cmd)
     sdcard_exec_cmd(SD_CMD_APP_CMD, 0, false);
   }
 
-  spi_write_blocking(SDCARD_SPI, data_out, 6);
+  chip_select();
+
+  spi_write_blocking(SYS_BUS_PRIMARY_INST, data_out, 6);
 
   // Wait for the card to execute the command
   uint8_t wait_byte;
-  spi_read_blocking(SDCARD_SPI, 0xFF, &wait_byte, 1);
+  spi_read_blocking(SYS_BUS_PRIMARY_INST, 0xFF, &wait_byte, 1);
+
+  chip_deselect();
 
   return 0;
 }
@@ -135,15 +133,19 @@ R1 sdcard_exec_cmd_r1(sd_card_command cmd, uint32_t arg, bool is_cmd)
 {
   sdcard_exec_cmd(cmd, arg, is_cmd);
 
+  chip_select();
+
   R1 r1;
   uint32_t cycles = 0;
   do
   {
-    spi_read_blocking(SDCARD_SPI, 0xFF, (uint8_t *)&r1, 1);
+    spi_read_blocking(SYS_BUS_PRIMARY_INST, 0xFF, (uint8_t *)&r1, 1);
     cycles++;
   } while (*(uint8_t *)&r1 == 0xFF); // Sometimes SD card sends 0xFF's when it's still busy
   if (cycles > 1)
     printf("sdcard_exec_cmd_r1() took %u cycles\n", cycles);
+
+  chip_deselect();
 
   return r1;
 }
@@ -171,12 +173,14 @@ retry:
     goto retry;
   }
 
+  chip_select();
+
   // Wait until the SD card responds with 0xFE (block start token)
   uint8_t byte;
   uint32_t cycles = 0;
   do
   {
-    spi_read_blocking(SDCARD_SPI, 0xFF, &byte, 1);
+    spi_read_blocking(SYS_BUS_PRIMARY_INST, 0xFF, &byte, 1);
     cycles++;
     if (byte != 0xFF && byte != 0xFE && byte != 0x00)
       printf("  - byte 0x%02X\n", byte);
@@ -189,8 +193,11 @@ retry:
     goto retry;
   }
 
-  spi_read_blocking(SDCARD_SPI, 0xFF, dst, SDCARD_BLOCK_SIZE);
+  spi_read_blocking(SYS_BUS_PRIMARY_INST, 0xFF, dst, SDCARD_BLOCK_SIZE);
   printf("  - success\n");
+
+  chip_deselect();
+
   return true;
 }
 
@@ -217,6 +224,8 @@ retry:
     goto retry;
   }
 
+  chip_select();
+
   uint32_t blocks_read = 0;
   do
   {
@@ -225,7 +234,7 @@ retry:
 
     do
     {
-      spi_read_blocking(SDCARD_SPI, 0xFF, &byte, 1);
+      spi_read_blocking(SYS_BUS_PRIMARY_INST, 0xFF, &byte, 1);
       cycles++;
     } while (byte != 0xFE && cycles < SDCARD_READ_RESPONSE_CYCLES); // Wait for the block start token
 
@@ -236,10 +245,10 @@ retry:
       goto retry;
     }
 
-    spi_read_blocking(SDCARD_SPI, 0xFF, dst + blocks_read * SDCARD_BLOCK_SIZE, SDCARD_BLOCK_SIZE);
+    spi_read_blocking(SYS_BUS_PRIMARY_INST, 0xFF, dst + blocks_read * SDCARD_BLOCK_SIZE, SDCARD_BLOCK_SIZE);
 
     uint16_t crc;
-    spi_read_blocking(SDCARD_SPI, 0xFF, (uint8_t *)&crc, 2); // CRC bytes
+    spi_read_blocking(SYS_BUS_PRIMARY_INST, 0xFF, (uint8_t *)&crc, 2); // CRC bytes
     uint16_t dst_crc = crc16_ccitt(dst + blocks_read * SDCARD_BLOCK_SIZE, SDCARD_BLOCK_SIZE);
     if (crc != dst_crc)
     {
@@ -250,6 +259,8 @@ retry:
 
     blocks_read++;
   } while (blocks_read < count);
+
+  chip_deselect();
 
   sdcard_exec_cmd(SD_CMD_STOP_TRANSMISSION, 0, false);
   printf("  - success, read %d blocks\n", blocks_read);
@@ -279,27 +290,31 @@ retry:
     goto retry;
   }
 
+  chip_select();
+
   // Send start block token 0xFE
   uint8_t response = 0xFE; // Reuse response variable
-  spi_write_blocking(SDCARD_SPI, &response, 1);
+  spi_write_blocking(SYS_BUS_PRIMARY_INST, &response, 1);
 
   // Send the data block
-  spi_write_blocking(SDCARD_SPI, src, SDCARD_BLOCK_SIZE);
+  spi_write_blocking(SYS_BUS_PRIMARY_INST, src, SDCARD_BLOCK_SIZE);
 
   // Send CRC
   uint16_t crc = crc16_ccitt(src, SDCARD_BLOCK_SIZE);
   uint8_t crc_bytes[2] = {(crc >> 8) & 0xFF, crc & 0xFF};
-  spi_write_blocking(SDCARD_SPI, crc_bytes, 2);
+  spi_write_blocking(SYS_BUS_PRIMARY_INST, crc_bytes, 2);
 
   // Read the data response token
   uint32_t cycles = 0;
   do
   {
-    spi_read_blocking(SDCARD_SPI, 0xFF, &response, 1);
+    spi_read_blocking(SYS_BUS_PRIMARY_INST, 0xFF, &response, 1);
     cycles++;
     if (response != 0xFF && response != 0xE5 && response != 0x00)
       printf("  - byte 0x%02X\n", response);
   } while (response != 0xE5 && cycles < SDCARD_WRITE_RESPONSE_CYCLES);
+
+  chip_deselect();
 
   if (response == 0xFF)
   {
@@ -319,26 +334,12 @@ bool sdcard_status()
 
 bool sdcard_init()
 {
+  printf("dev: sdcard initilization...\n");
+
   gen_crc_table();
 
-  // Wait 2ms for the card to power up
-  sleep_ms(2);
-
-  // Initialize SPI
-  spi_init(SDCARD_SPI, 400 * 1000); // Start with low frequency, when initializing the sdcard
-  gpio_set_function(SDCARD_MISO_PIN, GPIO_FUNC_SPI);
-  gpio_set_function(SDCARD_MOSI_PIN, GPIO_FUNC_SPI);
-  gpio_set_function(SDCARD_CLK_PIN, GPIO_FUNC_SPI);
-  // Tell picotool about the SPI pins
-  bi_decl(bi_3pins_with_func(SDCARD_MISO_PIN, SDCARD_MOSI_PIN, SDCARD_CLK_PIN, GPIO_FUNC_SPI));
-
   gpio_init(SDCARD_CS_PIN);
-  chip_select();
   gpio_set_dir(SDCARD_CS_PIN, GPIO_OUT);
-  // Make the CS pin available to picotool
-  bi_decl(bi_1pin_with_name(SDCARD_CS_PIN, "SPI CS"));
-
-  printf("SPI Initialized!\n");
 
 begin_init:
   uint8_t tries = 0;
@@ -349,16 +350,20 @@ begin_init:
   }
 
   // SD Card initialization
-  spi_read_blocking(SDCARD_SPI, 0xFF, NULL, 16); // Send 16 dummy bytes
+  chip_select();
+  spi_read_blocking(SYS_BUS_PRIMARY_INST, 0xFF, NULL, 16); // Send 16 dummy bytes
+  chip_deselect();
 
   sdcard_exec_cmd(SD_CMD_GO_IDLE_STATE, 0x0, false);
+  chip_select();
   uint8_t response[8];
   int cycles = 0;
   do
   {
-    spi_read_blocking(SDCARD_SPI, 0xFF, response, 1);
+    spi_read_blocking(SYS_BUS_PRIMARY_INST, 0xFF, response, 1);
     cycles++;
   } while (response[0] != 0x01 && cycles < 1000);
+  chip_deselect();
   if (cycles >= 1000)
   {
     printf("SD_CMD_GO_IDLE_STATE timed out\n");
@@ -370,7 +375,10 @@ begin_init:
 
 mid_init:
   sdcard_exec_cmd(SD_CMD_SEND_IF_COND, 0x000001AA, false);
-  spi_read_blocking(SDCARD_SPI, 0xFF, response, 5);
+
+  chip_select();
+  spi_read_blocking(SYS_BUS_PRIMARY_INST, 0xFF, response, 5);
+  chip_deselect();
 
   if (response[4] == 0xAA)
   {
@@ -379,7 +387,10 @@ mid_init:
 
   R7 r7;
   sdcard_exec_cmd(SD_CMD_READ_OCR, 0x0, false);
-  spi_read_blocking(SDCARD_SPI, 0xFF, (uint8_t *)&r7, 5);
+
+  chip_select();
+  spi_read_blocking(SYS_BUS_PRIMARY_INST, 0xFF, (uint8_t *)&r7, 5);
+  chip_deselect();
 
   printf("voltage ranges: 2.7-2.8=%d 2.8-2.9=%d 2.9-3.0=%d 3.0-3.1=%d 3.1-3.2=%d 3.2-3.3=%d 3.3-3.4=%d 3.4-3.5=%d 3.5-3.6=%d\n",
          r7.ocr.voltage_range_27_28, r7.ocr.voltage_range_28_29, r7.ocr.voltage_range_29_30, r7.ocr.voltage_range_30_31,
@@ -390,7 +401,9 @@ mid_init:
   do
   {
     sdcard_exec_cmd(SD_ACMD_SD_SEND_OP_COND, 0x40000000, true);
-    spi_read_blocking(SDCARD_SPI, 0xFF, response, 1);
+    chip_select();
+    spi_read_blocking(SYS_BUS_PRIMARY_INST, 0xFF, response, 1);
+    chip_deselect();
     cycles++;
     sleep_ms(1);
   } while (response[0] != 0x00 && cycles < 1000);
@@ -404,7 +417,9 @@ mid_init:
   printf("SP_ACMD_SD_SEND_OP_COND success, in_idle_state=%x\n", response[0]);
 
   sdcard_exec_cmd(SD_CMD_READ_OCR, 0x0, false);
-  spi_read_blocking(SDCARD_SPI, 0xFF, (uint8_t *)&r7, sizeof(R7));
+  chip_select();
+  spi_read_blocking(SYS_BUS_PRIMARY_INST, 0xFF, (uint8_t *)&r7, sizeof(R7));
+  chip_deselect();
   printf("in_idle_state=%d\n", r7.r1.in_idle_state);
   printf("card_capacity_status=%d\n", r7.ocr.card_capacity_status);
   use_block_adressing = r7.ocr.card_capacity_status;
@@ -416,18 +431,16 @@ mid_init:
   {
     printf("  we have an SDSC Card (<2GB)\n");
   }
+
   printf("card_power_up_status=%d\n", r7.ocr.card_power_up_status);
-
-  printf("SDCard fully initialized!\n");
-
-  // Increase bus speed
-  uint actual_baudrate = spi_set_baudrate(SDCARD_SPI, 13 * 1000 * 1000);
-  printf("SPI baudrate increased to %u Hz\n", actual_baudrate);
+  printf("sdcard initialized!\n");
 
   // Read CID (Card IDentification) register
   sdcard_exec_cmd(SD_CMD_SEND_CID, 0x0, false);
   CID cid;
-  spi_read_blocking(SDCARD_SPI, 0xFF, (uint8_t *)&cid, sizeof(CID));
+  chip_select();
+  spi_read_blocking(SYS_BUS_PRIMARY_INST, 0xFF, (uint8_t *)&cid, sizeof(CID));
+  chip_deselect();
   printf("CID\n");
   printf("  serial_number=%u\n", cid.serial_number);
   printf("  product_name=%5s\n", cid.product_name);
@@ -438,7 +451,9 @@ mid_init:
   // Set block length
   sdcard_exec_cmd(SD_CMD_SET_BLOCKLEN, SDCARD_BLOCK_SIZE, false);
   R1 r1;
-  spi_read_blocking(SDCARD_SPI, 0xFF, (uint8_t *)&r1, sizeof(R1));
+  chip_select();
+  spi_read_blocking(SYS_BUS_PRIMARY_INST, 0xFF, (uint8_t *)&r1, sizeof(R1));
+  chip_deselect();
   printf("r1 %x\n", r1);
 
   sdcard_initialized = true;

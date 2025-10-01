@@ -1,7 +1,3 @@
 CompileFlags:
-  Compiler: /nix/store/kf1fmdrj475cyhvdk5zhbnz1dafdxxxw-arm-none-eabi-gcc-wrapper-13.3.0/bin/arm-none-eabi-gcc
-  Add:
-    # -I./**
-    # -I/nix/store/g9i50g921vn7aqkycy810l9pcik370m2-source/**
-    -I/nix/store/g9i50g921vn7aqkycy810l9pcik370m2-source/src/common/pico_base_headers/include/pico.h
-    -I./build/generated/pico_base/pico/config_autogen.h
+  CompilationDatabase: "cmake"
+  Compiler: "arm-none-eabi-gcc"

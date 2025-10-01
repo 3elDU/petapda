@@ -9,10 +9,10 @@
 
 #include <stdio.h>
 
-#include "ff.h"			/* Obtains integer types */
+#include "ff.h"		/* Obtains integer types */
 #include "diskio.h" /* Declarations of disk functions */
 
-#include "sdcard.h"
+#include <dev/sdcard.h>
 
 /* Definitions of physical drive number for each drive */
 // #define DEV_RAM		0	/* Example: Map Ramdisk to physical drive 0 */
@@ -25,7 +25,7 @@
 /*-----------------------------------------------------------------------*/
 
 DSTATUS disk_status(
-		BYTE pdrv /* Physical drive nmuber to identify the drive */
+	BYTE pdrv /* Physical drive nmuber to identify the drive */
 )
 {
 	switch (pdrv)
@@ -41,7 +41,7 @@ DSTATUS disk_status(
 /*-----------------------------------------------------------------------*/
 
 DSTATUS disk_initialize(
-		BYTE pdrv /* Physical drive nmuber to identify the drive */
+	BYTE pdrv /* Physical drive nmuber to identify the drive */
 )
 {
 	int result;
@@ -61,10 +61,10 @@ DSTATUS disk_initialize(
 /*-----------------------------------------------------------------------*/
 
 DRESULT disk_read(
-		BYTE pdrv,		/* Physical drive nmuber to identify the drive */
-		BYTE *buff,		/* Data buffer to store read data */
-		LBA_t sector, /* Start sector in LBA */
-		UINT count		/* Number of sectors to read */
+	BYTE pdrv,	  /* Physical drive nmuber to identify the drive */
+	BYTE *buff,	  /* Data buffer to store read data */
+	LBA_t sector, /* Start sector in LBA */
+	UINT count	  /* Number of sectors to read */
 )
 {
 	bool result;
@@ -94,10 +94,10 @@ DRESULT disk_read(
 #if FF_FS_READONLY == 0
 
 DRESULT disk_write(
-		BYTE pdrv,				/* Physical drive nmuber to identify the drive */
-		const BYTE *buff, /* Data to be written */
-		LBA_t sector,			/* Start sector in LBA */
-		UINT count				/* Number of sectors to write */
+	BYTE pdrv,		  /* Physical drive nmuber to identify the drive */
+	const BYTE *buff, /* Data to be written */
+	LBA_t sector,	  /* Start sector in LBA */
+	UINT count		  /* Number of sectors to write */
 )
 {
 	DRESULT res;
@@ -128,9 +128,9 @@ DRESULT disk_write(
 /*-----------------------------------------------------------------------*/
 
 DRESULT disk_ioctl(
-		BYTE pdrv, /* Physical drive nmuber (0..) */
-		BYTE cmd,	 /* Control code */
-		void *buff /* Buffer to send/receive control data */
+	BYTE pdrv, /* Physical drive nmuber (0..) */
+	BYTE cmd,  /* Control code */
+	void *buff /* Buffer to send/receive control data */
 )
 {
 	DRESULT res;

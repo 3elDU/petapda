@@ -1,15 +1,10 @@
-#ifndef SDCARD_H
-#define SDCARD_H
+#ifndef DEV_SDCARD_H
+#define DEV_SDCARD_H
 
-#include <pico.h>
-#include "hardware/spi.h"
+#include <hardware/spi.h>
 
 // Pinout
-#define SDCARD_SPI spi_default
-#define SDCARD_CS_PIN PICO_DEFAULT_SPI_CSN_PIN
-#define SDCARD_CLK_PIN PICO_DEFAULT_SPI_SCK_PIN
-#define SDCARD_MOSI_PIN PICO_DEFAULT_SPI_TX_PIN
-#define SDCARD_MISO_PIN PICO_DEFAULT_SPI_RX_PIN
+#define SDCARD_CS_PIN 14
 
 #define SDCARD_BLOCK_SIZE 512
 // Retry up to 5 times when reading/writing a block and having a timeout when trying to receive

@@ -6,18 +6,9 @@ set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-# Load environment variables
-set(PICO_SDK_PATH ${CMAKE_CURRENT_LIST_DIR}/pico-sdk)
-set(PICO_TOOLCHAIN_PATH $ENV{PICO_TOOLCHAIN_PATH})
-set(CMAKE_C_COMPILER "${PICO_TOOLCHAIN_PATH}/arm-none-eabi-gcc")
-set(CMAKE_CXX_COMPILER "${PICO_TOOLCHAIN_PATH}/arm-none-eabi-g++")
-set(CMAKE_C_COMPILER_TARGET "arm-none-eabi")
-set(CMAKE_CXX_COMPILER_TARGET "arm-none-eabi")
-
 # Import Raspbery Pi Pico SDK
-set(PICO_SDK_INIT_CMAKE_FILE "${PICO_SDK_PATH}/pico_sdk_init.cmake")
-message(STATUS "Pico SDK init CMake file: ${PICO_SDK_INIT_CMAKE_FILE}")
-include(${PICO_SDK_INIT_CMAKE_FILE})
+set(PICO_SDK_PATH ${CMAKE_CURRENT_LIST_DIR}/pico-sdk)
+include(${CMAKE_CURRENT_LIST_DIR}/pico-sdk/pico_sdk_init.cmake)
 
 project(tinyos C CXX ASM)
 
@@ -33,7 +24,12 @@ add_subdirectory(lua)
 
 add_executable(main
     src/main.c
-    src/sdcard.c
+    src/sys/bus.c
+    src/dev/sdcard.c
+    src/dev/eink.c
+    src/gfx/screen.c
+    src/lua/screen.c
+    src/os/fs.c
     src/debug.c
     src/fs/diskio.c
     src/fs/ff.c
@@ -62,5 +58,9 @@ target_link_libraries(main
     hardware_spi
     lua_static
 )
+
+if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+    add_compile_definitions(DEBUG_BUILD)
+endif()
 
 pico_add_extra_outputs(main)

@@ -1,18 +1,18 @@
 {
-    "configurations": [
-        {
-            "name": "Pico",
-            "forcedInclude": [
-                "${workspaceFolder}/pico-sdk/src/common/pico_base_headers/include/pico.h",
-                "${workspaceFolder}/build/generated/pico_base/pico/config_autogen.h"
-            ],
-            "defines": [],
-            "compilerPath": "/nix/store/kf1fmdrj475cyhvdk5zhbnz1dafdxxxw-arm-none-eabi-gcc-wrapper-13.3.0/bin/arm-none-eabi-gcc",
-            "compileCommands": "${workspaceFolder}/build/compile_commands.json",
-            "cStandard": "c17",
-            "cppStandard": "c++14",
-            "intelliSenseMode": "linux-gcc-arm"
-        }
-    ],
-    "version": 4
+  "configurations": [
+    {
+      "name": "Pico",
+      "forcedInclude": [
+        "${workspaceFolder}/pico-sdk/src/common/pico_base_headers/include/pico.h",
+        "${workspaceFolder}/build/generated/pico_base/pico/config_autogen.h"
+      ],
+      "defines": [],
+      "compilerPath": "/usr/bin/arm-none-eabi-gcc",
+      "compileCommands": "${workspaceFolder}/build/compile_commands.json",
+      "cStandard": "c11",
+      "cppStandard": "c++17",
+      "intelliSenseMode": "linux-gcc-arm64"
+    }
+  ],
+  "version": 4
 }
