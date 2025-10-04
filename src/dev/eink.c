@@ -238,53 +238,57 @@ const unsigned char LUT_ALL[233] = {
     0x30,
 };
 
-/******************************************************************************
-function :	Software reset
-parameter:
-******************************************************************************/
-static void EPD_4IN2_V2_Reset(void)
+typedef enum
 {
-    gpio_put(EPD_RST_PIN, 1);
+    INIT_NONE,
+    INIT_FULL,
+    INIT_FAST,
+    INIT_PARTIAL,
+    INIT_4GRAY
+} init_mode_t;
+static init_mode_t cur_init_mode = INIT_NONE;
+
+/** Software reset */
+static void eink_reset(void)
+{
+    gpio_put(EINK_RST_PIN, 1);
     sleep_ms(100);
-    gpio_put(EPD_RST_PIN, 0);
+    gpio_put(EINK_RST_PIN, 0);
     sleep_ms(2);
-    gpio_put(EPD_RST_PIN, 1);
+    gpio_put(EINK_RST_PIN, 1);
     sleep_ms(100);
 }
 
-/******************************************************************************
-function :	send command
-parameter:
-     Reg : Command register
-******************************************************************************/
-static void EPD_4IN2_V2_SendCommand(uint8_t Reg)
+/** Send command to the screen */
+static void eink_send_cmd(uint8_t cmd)
 {
-    gpio_put(EPD_DC_PIN, 0);
-    gpio_put(EPD_CS_PIN, 0);
-    spi_write_blocking(SYS_BUS_PRIMARY_INST, &Reg, 1);
-    gpio_put(EPD_CS_PIN, 1);
+    gpio_put(EINK_DC_PIN, 0);
+    gpio_put(EINK_CS_PIN, 0);
+    spi_write_blocking(SYS_BUS_PRIMARY_INST, &cmd, 1);
+    gpio_put(EINK_CS_PIN, 1);
 }
 
-/******************************************************************************
-function :	send data
-parameter:
-    Data : Write data
-******************************************************************************/
-static void EPD_4IN2_V2_SendData(uint8_t Data)
+/** Send a byte to the screen */
+static void eink_send_byte(uint8_t data)
 {
-    gpio_put(EPD_DC_PIN, 1);
-    gpio_put(EPD_CS_PIN, 0);
-    spi_write_blocking(SYS_BUS_PRIMARY_INST, &Data, 1);
-    gpio_put(EPD_CS_PIN, 1);
+    gpio_put(EINK_DC_PIN, 1);
+    gpio_put(EINK_CS_PIN, 0);
+    spi_write_blocking(SYS_BUS_PRIMARY_INST, &data, 1);
+    gpio_put(EINK_CS_PIN, 1);
 }
 
-/******************************************************************************
-function :	Wait until the busy_pin goes LOW
-parameter:
-******************************************************************************/
-void EPD_4IN2_V2_ReadBusy(void)
+static void eink_send_data(const uint8_t *data, size_t len)
 {
-    while (gpio_get(EPD_BUSY_PIN) == 1)
+    gpio_put(EINK_DC_PIN, 1);
+    gpio_put(EINK_CS_PIN, 0);
+    spi_write_blocking(SYS_BUS_PRIMARY_INST, data, len);
+    gpio_put(EINK_CS_PIN, 1);
+}
+
+/** Wait until the EINK_BUSY_PIN goes low */
+void eink_read_busy(void)
+{
+    while (gpio_get(EINK_BUSY_PIN) == 1)
     { // LOW: idle, HIGH: busy
         sleep_ms(10);
     }
@@ -294,319 +298,264 @@ void EPD_4IN2_V2_ReadBusy(void)
 function :	Turn On Display
 parameter:
 ******************************************************************************/
-static void EPD_4IN2_V2_TurnOnDisplay(void)
+static void eink_turn_on_full(void)
 {
-    EPD_4IN2_V2_SendCommand(0x22);
-    EPD_4IN2_V2_SendData(0xF7);
-    EPD_4IN2_V2_SendCommand(0x20);
-    EPD_4IN2_V2_ReadBusy();
+    eink_send_cmd(0x22);
+    eink_send_byte(0xF7);
+    eink_send_cmd(0x20);
+    eink_read_busy();
 }
 
-static void EPD_4IN2_V2_TurnOnDisplay_Fast(void)
+static void eink_turn_on_fast(void)
 {
-    EPD_4IN2_V2_SendCommand(0x22);
-    EPD_4IN2_V2_SendData(0xC7);
-    EPD_4IN2_V2_SendCommand(0x20);
-    EPD_4IN2_V2_ReadBusy();
+    eink_send_cmd(0x22);
+    eink_send_byte(0xC7);
+    eink_send_cmd(0x20);
+    eink_read_busy();
 }
 
-static void EPD_4IN2_V2_TurnOnDisplay_Partial(void)
+static void eink_turn_on_partial(void)
 {
-    EPD_4IN2_V2_SendCommand(0x22);
-    EPD_4IN2_V2_SendData(0xFF);
-    EPD_4IN2_V2_SendCommand(0x20);
-    EPD_4IN2_V2_ReadBusy();
+    eink_send_cmd(0x22);
+    eink_send_byte(0xFF);
+    eink_send_cmd(0x20);
+    eink_read_busy();
 }
 
-static void EPD_4IN2_V2_TurnOnDisplay_4Gray(void)
+static void eink_turn_on_4gray(void)
 {
-    EPD_4IN2_V2_SendCommand(0x22);
-    EPD_4IN2_V2_SendData(0xCF);
-    EPD_4IN2_V2_SendCommand(0x20);
-    EPD_4IN2_V2_ReadBusy();
+    eink_send_cmd(0x22);
+    eink_send_byte(0xCF);
+    eink_send_cmd(0x20);
+    eink_read_busy();
 }
 
-/******************************************************************************
-function :	Setting the display window
-parameter:
-******************************************************************************/
-static void EPD_4IN2_V2_SetWindows(uint16_t Xstart, uint16_t Ystart, uint16_t Xend, uint16_t Yend)
+/** Set the display window */
+static void eink_set_window(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1)
 {
-    EPD_4IN2_V2_SendCommand(0x44); // SET_RAM_X_ADDRESS_START_END_POSITION
-    EPD_4IN2_V2_SendData((Xstart >> 3) & 0xFF);
-    EPD_4IN2_V2_SendData((Xend >> 3) & 0xFF);
+    eink_send_cmd(0x44); // SET_RAM_X_ADDRESS_START_END_POSITION
+    eink_send_byte((x0 >> 3) & 0xFF);
+    eink_send_byte((x1 >> 3) & 0xFF);
 
-    EPD_4IN2_V2_SendCommand(0x45); // SET_RAM_Y_ADDRESS_START_END_POSITION
-    EPD_4IN2_V2_SendData(Ystart & 0xFF);
-    EPD_4IN2_V2_SendData((Ystart >> 8) & 0xFF);
-    EPD_4IN2_V2_SendData(Yend & 0xFF);
-    EPD_4IN2_V2_SendData((Yend >> 8) & 0xFF);
+    eink_send_cmd(0x45); // SET_RAM_Y_ADDRESS_START_END_POSITION
+    eink_send_byte(y0 & 0xFF);
+    eink_send_byte((y0 >> 8) & 0xFF);
+    eink_send_byte(y1 & 0xFF);
+    eink_send_byte((y1 >> 8) & 0xFF);
 }
 
-/******************************************************************************
-function :	Set Cursor
-parameter:
-******************************************************************************/
-static void EPD_4IN2_V2_SetCursor(uint16_t Xstart, uint16_t Ystart)
+static void eink_set_cursor(uint16_t x0, uint16_t y0)
 {
-    EPD_4IN2_V2_SendCommand(0x4E); // SET_RAM_X_ADDRESS_COUNTER
-    EPD_4IN2_V2_SendData((Xstart >> 3) & 0xFF);
+    eink_send_cmd(0x4E); // SET_RAM_X_ADDRESS_COUNTER
+    eink_send_byte((x0 >> 3) & 0xFF);
 
-    EPD_4IN2_V2_SendCommand(0x4F); // SET_RAM_Y_ADDRESS_COUNTER
-    EPD_4IN2_V2_SendData(Ystart & 0xFF);
-    EPD_4IN2_V2_SendData((Ystart >> 8) & 0xFF);
+    eink_send_cmd(0x4F); // SET_RAM_Y_ADDRESS_COUNTER
+    eink_send_byte(y0 & 0xFF);
+    eink_send_byte((y0 >> 8) & 0xFF);
 }
 
 // LUT download
-static void EPD_4IN2_V2_4Gray_lut(void)
+static void eink_4gray_lut()
 {
     unsigned char i;
 
     // WS byte 0~152, the content of VS[nX-LUTm], TP[nX], RP[n], SR[nXY], FR[n] and XON[nXY]
-    EPD_4IN2_V2_SendCommand(0x32);
+    eink_send_cmd(0x32);
     for (i = 0; i < 227; i++)
     {
-        EPD_4IN2_V2_SendData(LUT_ALL[i]);
+        eink_send_byte(LUT_ALL[i]);
     }
     // WS byte 153, the content of Option for LUT end
-    EPD_4IN2_V2_SendCommand(0x3F);
-    EPD_4IN2_V2_SendData(LUT_ALL[i++]);
+    eink_send_cmd(0x3F);
+    eink_send_byte(LUT_ALL[i++]);
 
     // WS byte 154, the content of gate leve
-    EPD_4IN2_V2_SendCommand(0x03);
-    EPD_4IN2_V2_SendData(LUT_ALL[i++]); // VGH
+    eink_send_cmd(0x03);
+    eink_send_byte(LUT_ALL[i++]); // VGH
 
     // WS byte 155~157, the content of source level
-    EPD_4IN2_V2_SendCommand(0x04);
-    EPD_4IN2_V2_SendData(LUT_ALL[i++]); // VSH1
-    EPD_4IN2_V2_SendData(LUT_ALL[i++]); // VSH2
-    EPD_4IN2_V2_SendData(LUT_ALL[i++]); // VSL
+    eink_send_cmd(0x04);
+    eink_send_byte(LUT_ALL[i++]); // VSH1
+    eink_send_byte(LUT_ALL[i++]); // VSH2
+    eink_send_byte(LUT_ALL[i++]); // VSL
 
     // WS byte 158, the content of VCOM level
-    EPD_4IN2_V2_SendCommand(0x2c);
-    EPD_4IN2_V2_SendData(LUT_ALL[i++]); // VCOM
+    eink_send_cmd(0x2c);
+    eink_send_byte(LUT_ALL[i++]); // VCOM
 }
 
-/******************************************************************************
-function :	Initialize the e-Paper register
-parameter:
-******************************************************************************/
-void EPD_4IN2_V2_Init(void)
+/** Initialize the panel */
+void eink_init()
 {
     printf("dev: eink screen initilization...\n");
 
-    gpio_init(EPD_RST_PIN);
-    gpio_init(EPD_DC_PIN);
-    gpio_init(EPD_CS_PIN);
-    gpio_init(EPD_BUSY_PIN);
+    gpio_init(EINK_RST_PIN);
+    gpio_init(EINK_DC_PIN);
+    gpio_init(EINK_CS_PIN);
+    gpio_init(EINK_BUSY_PIN);
 
-    gpio_set_dir(EPD_RST_PIN, GPIO_OUT);
-    gpio_set_dir(EPD_DC_PIN, GPIO_OUT);
-    gpio_set_dir(EPD_CS_PIN, GPIO_OUT);
-    gpio_set_dir(EPD_BUSY_PIN, GPIO_IN);
+    gpio_set_dir(EINK_RST_PIN, GPIO_OUT);
+    gpio_set_dir(EINK_DC_PIN, GPIO_OUT);
+    gpio_set_dir(EINK_CS_PIN, GPIO_OUT);
+    gpio_set_dir(EINK_BUSY_PIN, GPIO_IN);
 
-    EPD_4IN2_V2_Reset();
+    eink_reset();
 
-    EPD_4IN2_V2_ReadBusy();
-    EPD_4IN2_V2_SendCommand(0x12); // soft  reset
-    EPD_4IN2_V2_ReadBusy();
+    eink_read_busy();
+    eink_send_cmd(0x12); // soft  reset
+    eink_read_busy();
 
     // EPD_4IN2_V2_SendCommand(0x01); //Driver output control
     // EPD_4IN2_V2_SendData((EPD_4IN2_V2_HEIGHT-1)%256);
     // EPD_4IN2_V2_SendData((EPD_4IN2_V2_HEIGHT-1)/256);
     // EPD_4IN2_V2_SendData(0x00);
 
-    EPD_4IN2_V2_SendCommand(0x21); //  Display update control
-    EPD_4IN2_V2_SendData(0x40);
-    EPD_4IN2_V2_SendData(0x00);
+    eink_send_cmd(0x21); //  Display update control
+    eink_send_byte(0x40);
+    eink_send_byte(0x00);
 
-    EPD_4IN2_V2_SendCommand(0x3C); // BorderWavefrom
-    EPD_4IN2_V2_SendData(0x05);
+    eink_send_cmd(0x3C); // BorderWavefrom
+    eink_send_byte(0x05);
 
-    EPD_4IN2_V2_SendCommand(0x11); // data  entry  mode
-    EPD_4IN2_V2_SendData(0x03);    // X-mode
+    eink_send_cmd(0x11);  // data  entry  mode
+    eink_send_byte(0x03); // X-mode
 
-    EPD_4IN2_V2_SetWindows(0, 0, EPD_4IN2_V2_WIDTH - 1, EPD_4IN2_V2_HEIGHT - 1);
+    eink_set_window(0, 0, EINK_WIDTH - 1, EINK_HEIGHT - 1);
 
-    EPD_4IN2_V2_SetCursor(0, 0);
+    eink_set_cursor(0, 0);
 
-    EPD_4IN2_V2_ReadBusy();
+    eink_read_busy();
 
+    cur_init_mode = INIT_FULL;
     printf("dev: eink screen initialized!\n");
 }
 
-/******************************************************************************
-function :	Initialize Fast the e-Paper register
-parameter:
-******************************************************************************/
-void EPD_4IN2_V2_Init_Fast(uint8_t Mode)
+/** Initialize the screen in fast mode */
+void eink_fast_init()
 {
-    EPD_4IN2_V2_Reset();
+    eink_reset();
 
-    EPD_4IN2_V2_ReadBusy();
-    EPD_4IN2_V2_SendCommand(0x12); // soft  reset
-    EPD_4IN2_V2_ReadBusy();
+    eink_read_busy();
+    eink_send_cmd(0x12); // soft  reset
+    eink_read_busy();
 
-    EPD_4IN2_V2_SendCommand(0x21);
-    EPD_4IN2_V2_SendData(0x40);
-    EPD_4IN2_V2_SendData(0x00);
+    eink_send_cmd(0x21);
+    eink_send_byte(0x40);
+    eink_send_byte(0x00);
 
-    EPD_4IN2_V2_SendCommand(0x3C);
-    EPD_4IN2_V2_SendData(0x05);
+    eink_send_cmd(0x3C);
+    eink_send_byte(0x05);
 
-    if (Mode == Seconds_1_5S)
-    {
-        // 1.5s
-        EPD_4IN2_V2_SendCommand(0x1A); // Write to temperature register
-        EPD_4IN2_V2_SendData(0x6E);
-    }
-    else if (Mode == Seconds_1S)
-    {
-        // 1s
-        EPD_4IN2_V2_SendCommand(0x1A); // Write to temperature register
-        EPD_4IN2_V2_SendData(0x5A);
-    }
+    eink_send_cmd(0x1A); // Write to temperature register
+    eink_send_byte(0x6E);
 
-    EPD_4IN2_V2_SendCommand(0x22); // Load temperature value
-    EPD_4IN2_V2_SendData(0x91);
-    EPD_4IN2_V2_SendCommand(0x20);
-    EPD_4IN2_V2_ReadBusy();
+    eink_send_cmd(0x22); // Load temperature value
+    eink_send_byte(0x91);
+    eink_send_cmd(0x20);
+    eink_read_busy();
 
-    EPD_4IN2_V2_SendCommand(0x11); // data  entry  mode
-    EPD_4IN2_V2_SendData(0x03);    // X-mode
+    eink_send_cmd(0x11);  // data  entry  mode
+    eink_send_byte(0x03); // X-mode
 
-    EPD_4IN2_V2_SetWindows(0, 0, EPD_4IN2_V2_WIDTH - 1, EPD_4IN2_V2_HEIGHT - 1);
+    eink_set_window(0, 0, EINK_WIDTH - 1, EINK_HEIGHT - 1);
 
-    EPD_4IN2_V2_SetCursor(0, 0);
+    eink_set_cursor(0, 0);
 
-    EPD_4IN2_V2_ReadBusy();
+    eink_read_busy();
+
+    cur_init_mode = INIT_FAST;
+    printf("dev: eink screen initialized in fast mode\n");
 }
 
-void EPD_4IN2_V2_Init_4Gray(void)
+void eink_4gray_init(void)
 {
-    EPD_4IN2_V2_Reset();
+    eink_reset();
 
-    EPD_4IN2_V2_SendCommand(0x12); // SWRESET
-    EPD_4IN2_V2_ReadBusy();
+    eink_send_cmd(0x12); // SWRESET
+    eink_read_busy();
 
-    EPD_4IN2_V2_SendCommand(0x21);
-    EPD_4IN2_V2_SendData(0x00);
-    EPD_4IN2_V2_SendData(0x00);
+    eink_send_cmd(0x21);
+    eink_send_byte(0x00);
+    eink_send_byte(0x00);
 
-    EPD_4IN2_V2_SendCommand(0x3C);
-    EPD_4IN2_V2_SendData(0x03);
+    eink_send_cmd(0x3C);
+    eink_send_byte(0x03);
 
-    EPD_4IN2_V2_SendCommand(0x0C); // BTST
-    EPD_4IN2_V2_SendData(0x8B);    // 8B
-    EPD_4IN2_V2_SendData(0x9C);    // 9C
-    EPD_4IN2_V2_SendData(0xA4);    // 96 A4
-    EPD_4IN2_V2_SendData(0x0F);    // 0F
+    eink_send_cmd(0x0C);  // BTST
+    eink_send_byte(0x8B); // 8B
+    eink_send_byte(0x9C); // 9C
+    eink_send_byte(0xA4); // 96 A4
+    eink_send_byte(0x0F); // 0F
 
     // EPD_4IN2_V2_SendCommand(0x01);   // 驱动输出控制      drive output control
     // EPD_4IN2_V2_SendData(0x2B); //  Y 的低字节
     // EPD_4IN2_V2_SendData(0x01); //  Y 的高字节
     // EPD_4IN2_V2_SendData(0x00);
 
-    EPD_4IN2_V2_4Gray_lut(); // LUT
+    eink_4gray_lut(); // LUT
 
-    EPD_4IN2_V2_SendCommand(0x11); // data  entry  mode
-    EPD_4IN2_V2_SendData(0x03);    // X-mode
+    eink_send_cmd(0x11);  // data  entry  mode
+    eink_send_byte(0x03); // X-mode
 
-    EPD_4IN2_V2_SetWindows(0, 0, EPD_4IN2_V2_WIDTH - 1, EPD_4IN2_V2_HEIGHT - 1);
+    eink_set_window(0, 0, EINK_WIDTH - 1, EINK_HEIGHT - 1);
 
-    EPD_4IN2_V2_SetCursor(0, 0);
+    eink_set_cursor(0, 0);
+
+    printf("dev: eink screen initialized in 4gray mode\n");
+    cur_init_mode = INIT_4GRAY;
 }
-/******************************************************************************
-function :	Clear screen
-parameter:
-******************************************************************************/
-void EPD_4IN2_V2_Clear(void)
+
+void eink_partial_init()
 {
-    uint16_t Width, Height;
-    Width = (EPD_4IN2_V2_WIDTH % 8 == 0) ? (EPD_4IN2_V2_WIDTH / 8) : (EPD_4IN2_V2_WIDTH / 8 + 1);
-    Height = EPD_4IN2_V2_HEIGHT;
+    eink_send_cmd(0x21);
+    eink_send_byte(0x00);
+    eink_send_byte(0x00);
 
-    EPD_4IN2_V2_SendCommand(0x24);
-    for (uint16_t j = 0; j < Height; j++)
-    {
-        for (uint16_t i = 0; i < Width; i++)
-        {
-            EPD_4IN2_V2_SendData(0xFF);
-        }
-    }
+    eink_send_cmd(0x3C);
+    eink_send_byte(0x80);
 
-    EPD_4IN2_V2_SendCommand(0x26);
-    for (uint16_t j = 0; j < Height; j++)
-    {
-        for (uint16_t i = 0; i < Width; i++)
-        {
-            EPD_4IN2_V2_SendData(0xFF);
-        }
-    }
-    EPD_4IN2_V2_TurnOnDisplay();
+    eink_send_cmd(0x11);  // data  entry  mode
+    eink_send_byte(0x03); // X-mode
+
+    eink_read_busy();
+
+    cur_init_mode = INIT_PARTIAL;
+    printf("dev: eink screen initialized in partial refresh mode\n");
 }
 
-/******************************************************************************
-function :	Sends the image buffer in RAM to e-Paper and displays
-parameter:
-******************************************************************************/
-void EPD_4IN2_V2_Display(uint8_t *Image)
+void eink_display(const uint8_t *image)
 {
-    uint16_t Width, Height;
-    Width = (EPD_4IN2_V2_WIDTH % 8 == 0) ? (EPD_4IN2_V2_WIDTH / 8) : (EPD_4IN2_V2_WIDTH / 8 + 1);
-    Height = EPD_4IN2_V2_HEIGHT;
+    if (cur_init_mode != INIT_FULL)
+        eink_init();
 
-    EPD_4IN2_V2_SendCommand(0x24);
-    for (uint16_t j = 0; j < Height; j++)
-    {
-        for (uint16_t i = 0; i < Width; i++)
-        {
-            EPD_4IN2_V2_SendData(Image[i + j * Width]);
-        }
-    }
+    eink_send_cmd(0x24);
+    eink_send_data(image, EINK_BUFSIZE);
 
-    EPD_4IN2_V2_SendCommand(0x26);
-    for (uint16_t j = 0; j < Height; j++)
-    {
-        for (uint16_t i = 0; i < Width; i++)
-        {
-            EPD_4IN2_V2_SendData(Image[i + j * Width]);
-        }
-    }
-    EPD_4IN2_V2_TurnOnDisplay();
+    eink_send_cmd(0x26);
+    eink_send_data(image, EINK_BUFSIZE);
+
+    eink_turn_on_full();
 }
 
-/******************************************************************************
-function :	Sends the image buffer in RAM to e-Paper and fast displays
-parameter:
-******************************************************************************/
-void EPD_4IN2_V2_Display_Fast(uint8_t *Image)
+void eink_fast_display(const uint8_t *image)
 {
+    if (cur_init_mode != INIT_FAST)
+        eink_fast_init();
+
     uint16_t Width, Height;
-    Width = (EPD_4IN2_V2_WIDTH % 8 == 0) ? (EPD_4IN2_V2_WIDTH / 8) : (EPD_4IN2_V2_WIDTH / 8 + 1);
-    Height = EPD_4IN2_V2_HEIGHT;
+    Width = (EINK_WIDTH % 8 == 0) ? (EINK_WIDTH / 8) : (EINK_WIDTH / 8 + 1);
+    Height = EINK_HEIGHT;
 
-    EPD_4IN2_V2_SendCommand(0x24);
-    for (uint16_t j = 0; j < Height; j++)
-    {
-        for (uint16_t i = 0; i < Width; i++)
-        {
-            EPD_4IN2_V2_SendData(Image[i + j * Width]);
-        }
-    }
+    eink_send_cmd(0x24);
+    eink_send_data(image, EINK_BUFSIZE);
 
-    EPD_4IN2_V2_SendCommand(0x26);
-    for (uint16_t j = 0; j < Height; j++)
-    {
-        for (uint16_t i = 0; i < Width; i++)
-        {
-            EPD_4IN2_V2_SendData(Image[i + j * Width]);
-        }
-    }
-    EPD_4IN2_V2_TurnOnDisplay_Fast();
+    eink_send_cmd(0x26);
+    eink_send_data(image, EINK_BUFSIZE);
+
+    eink_turn_on_fast();
 }
 
-void EPD_4IN2_V2_Display_4Gray(const uint8_t *Image)
+void eink_4gray_display(const uint8_t *Image)
 {
     unsigned long i, j, k, m;
     uint8_t temp1, temp2, temp3;
@@ -615,17 +564,17 @@ void EPD_4IN2_V2_Display_4Gray(const uint8_t *Image)
     0x10|  01     01     00     00
     0x13|  01     00     01     00
     *********************************/
-    EPD_4IN2_V2_SendCommand(0x24);
+    eink_send_cmd(0x24);
     // EPD_4IN2_HEIGHT
     // EPD_4IN2_WIDTH
-    for (m = 0; m < EPD_4IN2_V2_HEIGHT; m++)
-        for (i = 0; i < EPD_4IN2_V2_WIDTH / 8; i++)
+    for (m = 0; m < EINK_HEIGHT; m++)
+        for (i = 0; i < EINK_WIDTH / 8; i++)
         {
             temp3 = 0;
             for (j = 0; j < 2; j++)
             {
 
-                temp1 = Image[(m * (EPD_4IN2_V2_WIDTH / 8) + i) * 2 + j];
+                temp1 = Image[(m * (EINK_WIDTH / 8) + i) * 2 + j];
                 for (k = 0; k < 2; k++)
                 {
                     temp2 = temp1 & 0xC0;
@@ -655,17 +604,17 @@ void EPD_4IN2_V2_Display_4Gray(const uint8_t *Image)
                     temp1 <<= 2;
                 }
             }
-            EPD_4IN2_V2_SendData(temp3);
+            eink_send_byte(temp3);
         }
     // new  data
-    EPD_4IN2_V2_SendCommand(0x26);
-    for (m = 0; m < EPD_4IN2_V2_HEIGHT; m++)
-        for (i = 0; i < EPD_4IN2_V2_WIDTH / 8; i++)
+    eink_send_cmd(0x26);
+    for (m = 0; m < EINK_HEIGHT; m++)
+        for (i = 0; i < EINK_WIDTH / 8; i++)
         {
             temp3 = 0;
             for (j = 0; j < 2; j++)
             {
-                temp1 = Image[(m * (EPD_4IN2_V2_WIDTH / 8) + i) * 2 + j];
+                temp1 = Image[(m * (EINK_WIDTH / 8) + i) * 2 + j];
                 for (k = 0; k < 2; k++)
                 {
                     temp2 = temp1 & 0xC0;
@@ -695,74 +644,46 @@ void EPD_4IN2_V2_Display_4Gray(const uint8_t *Image)
                     temp1 <<= 2;
                 }
             }
-            EPD_4IN2_V2_SendData(temp3);
+            eink_send_byte(temp3);
         }
-    EPD_4IN2_V2_TurnOnDisplay_4Gray();
+    eink_turn_on_4gray();
 }
 
 // Send partial data for partial refresh
-void EPD_4IN2_V2_PartialDisplay(uint8_t *Image, uint16_t Xstart, uint16_t Ystart, uint16_t Xend, uint16_t Yend)
+void eink_partial_display(const uint8_t *image, uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1)
 {
-    if ((Xstart % 8 + Xend % 8 == 8 && Xstart % 8 > Xend % 8) || Xstart % 8 + Xend % 8 == 0 || (Xend - Xstart) % 8 == 0)
+    if (cur_init_mode != INIT_PARTIAL)
+        eink_partial_init();
+
+    // Divide and round X0 and X1 to nearest number that multiplies by 8
+    x0 = x0 % 8 == 0 ? x0 / 8 : x0 / 8 + 1;
+    x1 = x1 % 8 == 0 ? x1 / 8 : x1 / 8 + 1;
+
+    size_t line_length = x1 - x0;
+
+    x1 -= 1;
+    y1 -= 1;
+
+    eink_set_window(x0 * 8, y0, x1 * 8, y1);
+    eink_set_cursor(x0 * 8, y0);
+
+    eink_read_busy();
+
+    // Send data in lines from y0 to y1
+
+    eink_send_cmd(0x24);
+    for (uint16_t y = y0; y < y1; y++)
     {
-        Xstart = Xstart / 8;
-        Xend = Xend / 8;
-    }
-    else
-    {
-        Xstart = Xstart / 8;
-        Xend = Xend % 8 == 0 ? Xend / 8 : Xend / 8 + 1;
-    }
-
-    uint16_t i, Width;
-    Width = Xend - Xstart;
-    uint16_t IMAGE_COUNTER = Width * (Yend - Ystart);
-
-    Xend -= 1;
-    Yend -= 1;
-
-    EPD_4IN2_V2_SendCommand(0x21);
-    EPD_4IN2_V2_SendData(0x00);
-    EPD_4IN2_V2_SendData(0x00);
-
-    EPD_4IN2_V2_SendCommand(0x3C);
-    EPD_4IN2_V2_SendData(0x80);
-
-    EPD_4IN2_V2_SendCommand(0x11); // data  entry  mode
-    EPD_4IN2_V2_SendData(0x03);    // X-mode
-
-    EPD_4IN2_V2_SendCommand(0x44);              // set RAM x address start/end, in page 35
-    EPD_4IN2_V2_SendData(Xstart & 0xff);        // RAM x address start at 00h;
-    EPD_4IN2_V2_SendData(Xend & 0xff);          // RAM x address end at 0fh(15+1)*8->128
-    EPD_4IN2_V2_SendCommand(0x45);              // set RAM y address start/end, in page 35
-    EPD_4IN2_V2_SendData(Ystart & 0xff);        // RAM y address start at 0127h;
-    EPD_4IN2_V2_SendData((Ystart >> 8) & 0x01); // RAM y address start at 0127h;
-    EPD_4IN2_V2_SendData(Yend & 0xff);          // RAM y address end at 00h;
-    EPD_4IN2_V2_SendData((Yend >> 8) & 0x01);
-
-    EPD_4IN2_V2_SendCommand(0x4E); // set RAM x address count to 0;
-    EPD_4IN2_V2_SendData(Xstart & 0xff);
-    EPD_4IN2_V2_SendCommand(0x4F); // set RAM y address count to 0X127;
-    EPD_4IN2_V2_SendData(Ystart & 0xff);
-    EPD_4IN2_V2_SendData((Ystart >> 8) & 0x01);
-
-    EPD_4IN2_V2_ReadBusy();
-
-    EPD_4IN2_V2_SendCommand(0x24);
-    for (uint16_t j = 0; j < IMAGE_COUNTER; j++)
-    {
-        EPD_4IN2_V2_SendData(Image[j]);
+        eink_send_data(&image[y * EINK_WIDTH / 8 + x0], line_length);
     }
 
-    EPD_4IN2_V2_TurnOnDisplay_Partial();
+    eink_turn_on_partial();
 }
-/******************************************************************************
-function :	Enter sleep mode
-parameter:
-******************************************************************************/
-void EPD_4IN2_V2_Sleep(void)
+
+/** Enter sleep mode */
+void eink_sleep(void)
 {
-    EPD_4IN2_V2_SendCommand(0x10); // DEEP_SLEEP
-    EPD_4IN2_V2_SendData(0x01);
+    eink_send_cmd(0x10); // DEEP_SLEEP
+    eink_send_byte(0x01);
     sleep_ms(200);
 }

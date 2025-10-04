@@ -91,19 +91,15 @@ void main_task(__unused void *pvParameters)
   {
     const char *err = lua_tostring(lua, -1);
 
-    printf("lua error: %s\n", lua_tostring(lua, -1));
+    printf("lua error: %s\n", err);
 
-    screen_clear();
-    screen_set_background(FOREGROUND);
-    screen_set_foreground(BACKGROUND);
-    screen_fill_background(0, 0, SCREEN_COLUMNS, SCREEN_LINES);
+    box_size_t box1 = screen_measure_text("Lua error");
+    box_size_t box2 = screen_measure_text_fit(err, EINK_WIDTH - 24);
 
-    screen_print_text("--- lua error ---");
-
-    screen_move_cursor(0, 2);
-    screen_print_text(err);
-
-    screen_render();
+    screen_fill(C_BLACK);
+    screen_draw_text(EINK_WIDTH / 2 - box1.w / 2, EINK_HEIGHT / 2 - 30, "Lua error", C_WHITE);
+    screen_draw_text_fit(12, EINK_HEIGHT / 2, err, C_WHITE, EINK_WIDTH - 24);
+    screen_full_refresh();
 
     lua_pop(lua, 1);
   }
@@ -145,16 +141,14 @@ int main(void)
 
   // Initialize devices
   sdcard_init();
-  EPD_4IN2_V2_Init();
-  EPD_4IN2_V2_Clear();
+  eink_init();
   joystick_init();
 
   sys_bus_go_fullspeed();
 
-  screen_init();
-  screen_clear();
-
-  EPD_4IN2_V2_Init_Fast(Seconds_1_5S);
+  screen_fill(C_WHITE);
+  screen_draw_text(16, 16, "booting...", C_BLACK);
+  screen_full_refresh();
 
   vLaunch();
   return 0;

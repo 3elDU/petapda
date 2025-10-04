@@ -5,79 +5,103 @@
 #include <stdint.h>
 #include "font.h"
 
-// Screen Y resolution in characters
-#define SCREEN_LINES (EPD_4IN2_V2_HEIGHT / FONT_HEIGHT)
-// Screen X resolution in characters
-#define SCREEN_COLUMNS (EPD_4IN2_V2_WIDTH / FONT_WIDTH)
-#define SCREEN_BUFFERS 1
+typedef uint8_t color_t;
 
 // Common colors, in RGB565 format
-#define BLACK 0
-#define WHITE 1
-#define BACKGROUND WHITE
-#define FOREGROUND BLACK
-
-/* A character with all metadata required to render it */
-typedef struct
-{
-  uint16_t background;
-  uint16_t foreground;
-  uint8_t flags;
-  char character;
-} character_t;
+#define C_BLACK (color_t)0
+#define C_WHITE (color_t)255
 
 typedef struct
 {
   uint16_t x;
   uint16_t y;
-} cursor_t;
+  uint16_t x1;
+  uint16_t y1;
+} box_t;
 
-// Set the character at given position
-void screen_set_char(uint16_t x, uint16_t y, character_t character);
-// Set the character at given position with the default colors
-void screen_set_char_default(uint16_t x, uint16_t y, char character);
+typedef struct
+{
+  uint16_t w;
+  uint16_t h;
+} box_size_t;
 
-// Move cursor to a specific position
-void screen_move_cursor(uint16_t x, uint16_t y);
-// Move cursor relative to it's current position. Handles horizontal overflow
-void screen_move_cursor_relative(int16_t x, int16_t y);
-// Get cursor position on the screen
-cursor_t screen_get_cursor();
+/** Set an individual pixel */
+void screen_set(uint16_t x, uint16_t y, color_t color);
+/** Get an individual pixel */
+color_t screen_get(uint16_t x, uint16_t y);
 
-// Set the foreground color for text
-void screen_set_foreground(uint16_t color);
-// Set the background color for text
-void screen_set_background(uint16_t color);
-// Set the foreground and background colors for text
-void screen_set_color(uint16_t background, uint16_t foreground);
-// Set the flags for text
-void screen_set_flag(uint8_t flag);
+/** Fill screen with solid color */
+void screen_fill(color_t color);
 
-// Fill the rectangle with the current background color.
-// Does not clear characters in the way, only changes their background color
-void screen_fill_background(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1);
+/** Fill a rectangular area with solid color */
+void screen_fill_rect(box_t rect, color_t color);
+/** Draw an outline rectangle */
+void screen_outline_rect(box_t rect, color_t outline);
 
-// Set the text at given position. Handles line breaks, overflows and tabulation
-void screen_set_text(uint16_t x, uint16_t y, char *text);
+/** Draw a line from point A to point B */
+void screen_draw_line(box_t line, color_t color);
 
-// Print a character at the cursor position
-void screen_print_char(char character);
-// Print text at the cursor position
-void screen_print_text(const char *text);
-// Print formatted text at the cursor position
-void screen_printf(const char *format, ...);
+/**
+ * Measure width and height of the character, without drawing it on screen
+ *
+ * @returns width and height of the character
+ */
+box_size_t screen_measure_char(char ch);
 
-// Get the active screen buffer
-uint8_t screen_get_buffer();
-// Set the active screen buffer
-void screen_set_buffer(uint8_t buffer);
-// Clear the screen
-void screen_clear();
-// Scroll the screen by N lines up
-void screen_scroll(uint8_t lines);
-// Render the screen buffer to the screen
-void screen_render();
+/**
+ * Draw a single character on the screen
+ *
+ * @returns width and height of the character
+ */
+box_size_t screen_draw_char(uint16_t x, uint16_t y, char ch, color_t color);
 
-void screen_init();
+/**
+ * Draw text on the screen, while trying to fit it inside a box of specified width
+ *
+ * @returns width and height of the rendered text box
+ */
+box_size_t screen_draw_text_fit(uint16_t x, uint16_t y, const char *text, color_t color, uint16_t width);
+/**
+ * Draw text on the screen
+ *
+ * @returns width and height of the rendered text box
+ */
+box_size_t screen_draw_text(uint16_t x, uint16_t y, const char *text, color_t color);
+
+/**
+ * Measure width and height of given string on the screen, without drawing it, while trying to fit inside a box of specified width.
+ *
+ * @returns width and height of the text box
+ */
+box_size_t screen_measure_text_fit(const char *text, uint16_t width);
+/**
+ * Measure width and height of given string on the screen, without drawing it.
+ *
+ * @returns width and height of the text box
+ */
+box_size_t screen_measure_text(const char *text);
+
+/**
+ * Do a full refresh. This is the slowest refresh, screen will flicker multiple
+ * times, but this removes any ghosting left by fast/partial refreshes.
+ */
+void screen_full_refresh();
+/**
+ * Do a fast refresh. Screen will flicker only once with negative of the image.
+ * I have not spotted any ghosting left by a fast refresh.
+ */
+void screen_fast_refresh();
+/**
+ * Do a partial refresh of the whole screen. This is the fastest refresh method,
+ * showing new image immediately, but leaving some ghosting of the previous image.
+ *
+ * After a couple partial refreshes, it is advised to do a full refresh.
+ */
+void screen_partial_refresh();
+/**
+ * Do a partial refresh of an area.
+ * Similar to `screen_partial_refresh()`, but only shows the specified area
+ */
+void screen_partial_refresh_area(box_t area);
 
 #endif

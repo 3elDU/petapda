@@ -7,26 +7,22 @@
 #include <stdint.h>
 
 // Pinout
-#define EPD_RST_PIN 2
-#define EPD_DC_PIN 3
-#define EPD_CS_PIN 4
-#define EPD_BUSY_PIN 1
+#define EINK_RST_PIN 2
+#define EINK_DC_PIN 3
+#define EINK_CS_PIN 4
+#define EINK_BUSY_PIN 1
 
 // Display resolution
-#define EPD_4IN2_V2_WIDTH 400
-#define EPD_4IN2_V2_HEIGHT 300
+#define EINK_WIDTH 400
+#define EINK_HEIGHT 300
+// Size of buffer to hold whole screen
+#define EINK_BUFSIZE EINK_WIDTH *EINK_HEIGHT / 8
 
-#define Seconds_1_5S 0
-#define Seconds_1S 1
-
-void EPD_4IN2_V2_Init(void);
-void EPD_4IN2_V2_Init_Fast(uint8_t Mode);
-void EPD_4IN2_V2_Init_4Gray(void);
-void EPD_4IN2_V2_Clear(void);
-void EPD_4IN2_V2_Display(uint8_t *Image);
-void EPD_4IN2_V2_Display_Fast(uint8_t *Image);
-void EPD_4IN2_V2_Display_4Gray(const uint8_t *Image);
-void EPD_4IN2_V2_PartialDisplay(uint8_t *Image, uint16_t Xstart, uint16_t Ystart, uint16_t Xend, uint16_t Yend);
-void EPD_4IN2_V2_Sleep(void);
+void eink_init();
+void eink_display(const uint8_t *image);
+void eink_fast_display(const uint8_t *image);
+void eink_4gray_display(const uint8_t *Image);
+void eink_partial_display(const uint8_t *image, uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1);
+void eink_sleep(void);
 
 #endif

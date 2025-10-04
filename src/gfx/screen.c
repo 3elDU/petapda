@@ -3,296 +3,191 @@
 #include <pico/stdio.h>
 #include <pico/printf.h>
 #include <string.h>
-#include <stdarg.h>
+#include <stdlib.h>
 
-character_t screenbufs[SCREEN_BUFFERS][SCREEN_LINES][SCREEN_COLUMNS];
-// One pixel is stored using 2 bits
-uint8_t screenbuf[EPD_4IN2_V2_WIDTH * EPD_4IN2_V2_HEIGHT / 8];
-// The active screen buffer
-uint8_t act = 0;
+// 8 bytes can store 8 pixels, so divide width by eight.
+static uint8_t framebufs[2][EINK_HEIGHT][EINK_WIDTH / 8];
+// active framebuffer
+static uint8_t act = 0;
 
-uint16_t cursor_x = 0;
-uint16_t cursor_y = 0;
-// These are applied when the text is printer under the cursor
-uint16_t cursor_background = BACKGROUND;
-uint16_t cursor_foreground = FOREGROUND;
-uint16_t cursor_flags = 0;
+#define PIXEL(x, y) framebufs[act][y][x >> 3]
+#define MASK(x) (uint8_t)(0b10000000 >> (x & 0b111))
 
-void screen_set_pixel(uint16_t x, uint16_t y, bool value)
+void screen_set(uint16_t x, uint16_t y, color_t color)
 {
-  uint16_t idx = (y * EPD_4IN2_V2_WIDTH + x) / 8;
-
-  uint8_t mask = ~(1 << (7 - x % 8));
-  uint8_t current_pixel_masked = screenbuf[idx] & mask;
-  screenbuf[idx] = current_pixel_masked | value << (7 - x % 8);
+  uint8_t pixel = PIXEL(x, y) & ~MASK(x);
+  pixel |= color & MASK(x);
+  PIXEL(x, y) = pixel;
+}
+color_t screen_get(uint16_t x, uint16_t y)
+{
+  return (color_t)((PIXEL(x, y) >> (7 - x & 0b111)) & 0x1);
 }
 
-void screen_set_char(uint16_t x, uint16_t y, character_t character)
+void screen_fill(color_t color)
 {
-  screenbufs[act][y][x] = character;
+  memset(&framebufs[act], color ? 0xFF : 0, EINK_WIDTH * EINK_HEIGHT / 8);
 }
-void screen_set_char_default(uint16_t x, uint16_t y, char character)
+
+void screen_fill_rect(box_t rect, color_t color)
 {
-  screenbufs[act][y][x] = (character_t){
-      .background = cursor_background,
-      .foreground = cursor_foreground,
-      .flags = cursor_flags,
-      .character = character,
+  for (uint16_t y = rect.y; y < rect.y1 && y < EINK_HEIGHT; y++)
+  {
+    for (uint16_t x = rect.x; x < rect.x1 && x < EINK_WIDTH; x++)
+    {
+      screen_set(x, y, color);
+    }
+  }
+}
+
+void screen_outline_rect(box_t rect, color_t outline)
+{
+  // top / bottom lines
+  for (uint16_t x = rect.x; x < rect.x1 && x < EINK_WIDTH; x++)
+  {
+    screen_set(x, rect.y, outline);
+    screen_set(x, rect.y1, outline);
+  }
+  // left / right lines
+  for (uint16_t y = rect.y; y < rect.y1 && y < EINK_HEIGHT; y++)
+  {
+    screen_set(rect.x, y, outline);
+    screen_set(rect.x1, y, outline);
+  }
+}
+
+void screen_draw_line(box_t line, color_t color)
+{
+  int dx = abs(line.x1 - line.x);
+  int sx = (line.x < line.x1) ? 1 : -1;
+  int dy = -abs(line.y1 - line.y);
+  int sy = (line.y < line.y1) ? 1 : -1;
+  int err = dx + dy; // error term
+
+  while (1)
+  {
+    screen_set(line.x, line.y, color);
+
+    if (line.x == line.x1 && line.y == line.y1)
+      break;
+
+    int e2 = 2 * err;
+    if (e2 >= dy)
+    { // step in x
+      err += dy;
+      line.x += sx;
+    }
+    if (e2 <= dx)
+    { // step in y
+      err += dx;
+      line.y += sy;
+    }
+  }
+}
+
+box_size_t screen_measure_char(__unused char ch)
+{
+  return (box_size_t){
+      .w = CHAR_WIDTH,
+      .h = CHAR_HEIGHT,
   };
 }
 
-void screen_move_cursor(uint16_t x, uint16_t y)
+box_size_t screen_draw_char(uint16_t x, uint16_t y, char ch, color_t color)
 {
-  cursor_x = x;
-  cursor_y = y;
-}
-void screen_move_cursor_relative(int16_t x, int16_t y)
-{
-  cursor_x += x;
-  cursor_y += y;
-
-  if (cursor_x >= SCREEN_COLUMNS)
+  for (uint16_t fy = 0; fy < CHAR_WIDTH; fy++)
   {
-    cursor_x = 0;
-    cursor_y++;
-  }
-
-  if (cursor_y >= SCREEN_LINES)
-  {
-    cursor_y = SCREEN_LINES - 1;
-    cursor_x = SCREEN_COLUMNS - 1;
-  }
-}
-cursor_t screen_get_cursor()
-{
-  return (cursor_t){
-      .x = cursor_x,
-      .y = cursor_y,
-  };
-}
-
-void screen_set_foreground(uint16_t color)
-{
-  cursor_foreground = color;
-}
-void screen_set_background(uint16_t color)
-{
-  cursor_background = color;
-}
-void screen_set_color(uint16_t background, uint16_t foreground)
-{
-  cursor_foreground = foreground;
-  cursor_background = background;
-}
-void screen_set_flag(uint8_t flag)
-{
-  cursor_flags = flag;
-}
-
-void screen_fill_background(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1)
-{
-  for (uint16_t y = y0; y <= y1; y++)
-  {
-    for (uint16_t x = x0; x <= x1; x++)
+    for (uint16_t fx = 0; fx < CHAR_HEIGHT; fx++)
     {
-      if (x >= SCREEN_COLUMNS || y >= SCREEN_LINES)
-        continue;
-
-      screenbufs[act][y][x].background = cursor_background;
-    }
-  }
-}
-
-void screen_set_text(uint16_t x, uint16_t y, char *text)
-{
-  uint16_t i = 0;
-  char curchar;
-
-  while ((curchar = text[i++]))
-  {
-    switch (curchar)
-    {
-    case '\n':
-      y++;
-      x = 0;
-      break;
-
-    case '\t':
-      x += 4;
-      break;
-
-    default:
-      screen_set_char(x, y, (character_t){
-                                .background = cursor_background,
-                                .foreground = cursor_foreground,
-                                .flags = cursor_flags,
-                                .character = curchar,
-                            });
-      x++;
-    }
-
-    // Check for horizontal overflow
-    if (x >= SCREEN_COLUMNS)
-    {
-      y++;
-      x = 0;
-    }
-
-    // Check for overflows
-    if (y >= SCREEN_LINES)
-    {
-      break;
-    }
-  }
-}
-
-void screen_print_char(char character)
-{
-  switch (character)
-  {
-  case '\n':
-    cursor_y++;
-    cursor_x = 0;
-    break;
-  case '\t':
-    cursor_x += 4;
-    break;
-
-  default:
-    screen_set_char_default(cursor_x, cursor_y, character);
-    cursor_x++;
-  }
-
-  // Check for horizontal overflow
-  if (cursor_x >= SCREEN_COLUMNS)
-  {
-    cursor_y++;
-    cursor_x = 0;
-  }
-
-  if (cursor_y >= SCREEN_LINES)
-  {
-    screen_scroll(1);
-    cursor_y = SCREEN_LINES - 1;
-    cursor_x = 0;
-  }
-}
-
-void screen_print_text(const char *text)
-{
-  uint16_t i = 0;
-  char curchar;
-
-  while ((curchar = text[i++]))
-  {
-    screen_print_char(curchar);
-  }
-}
-
-void screen_printf(const char *format, ...)
-{
-  va_list args;
-  va_start(args, format);
-
-  char buf[1024];
-  vsprintf(buf, format, args);
-
-  screen_print_text(buf);
-}
-
-uint8_t screen_get_buffer()
-{
-  return act;
-}
-
-void screen_set_buffer(uint8_t buffer)
-{
-  if (buffer > SCREEN_BUFFERS - 1)
-  {
-    buffer = SCREEN_BUFFERS - 1;
-  }
-
-  act = buffer;
-}
-
-void screen_clear()
-{
-  for (uint16_t y = 0; y < SCREEN_LINES; y++)
-  {
-    for (uint16_t x = 0; x < SCREEN_COLUMNS; x++)
-    {
-      screen_set_char(x, y, (character_t){
-                                .background = BACKGROUND,
-                                .foreground = FOREGROUND,
-                                .flags = 0,
-                                .character = ' ',
-                            });
-    }
-  }
-  screen_move_cursor(0, 0);
-}
-
-void screen_init()
-{
-  memset(screenbufs[act], 0, SCREEN_LINES * SCREEN_COLUMNS * sizeof(character_t));
-}
-
-void screen_scroll(uint8_t lines)
-{
-  for (uint16_t y = 0; y < SCREEN_LINES; y++)
-  {
-    if (y + lines < SCREEN_LINES)
-    {
-      memcpy(&screenbufs[act][y], &screenbufs[act][y + lines], SCREEN_COLUMNS * sizeof(character_t));
-    }
-    else
-    {
-      for (uint16_t x = 0; x < SCREEN_COLUMNS; x++)
+      if (x + fx < EINK_WIDTH && y + fy < EINK_HEIGHT)
       {
-        screenbufs[act][y][x] = (character_t){
-            .background = BACKGROUND,
-            .foreground = FOREGROUND,
-            .flags = 0,
-            .character = ' ',
-        };
-      }
-    }
-  }
-}
+        bool filled = font[ch][fy][fx];
 
-void screen_render()
-{
-  for (uint16_t y = 0; y < SCREEN_LINES; y++)
-  {
-    for (uint16_t x = 0; x < SCREEN_COLUMNS; x++)
-    {
-
-      character_t character = screenbufs[act][y][x];
-
-      for (uint16_t py = 0; py < FONT_HEIGHT; py++)
-      {
-        for (uint16_t px = x * FONT_WIDTH; px < x * FONT_WIDTH + FONT_WIDTH; px++)
+        if (filled)
         {
-          uint8_t pixel;
-
-          uint8_t local_x = (px % FONT_WIDTH) / FONT_SCALING;
-          uint8_t local_y = py / FONT_SCALING;
-
-          if (local_x >= CHAR_WIDTH || local_y >= CHAR_HEIGHT)
-          {
-            pixel = character.background;
-          }
-          else
-          {
-            bool filled = font[character.character][local_y][local_x];
-            pixel = filled ? character.foreground : character.background;
-          }
-
-          screen_set_pixel(px, y * FONT_HEIGHT + py, pixel);
+          screen_set(x + fx, y + fy, color);
         }
       }
     }
   }
 
-  EPD_4IN2_V2_Display_Fast(screenbuf);
+  return (box_size_t){
+      .w = CHAR_WIDTH,
+      .h = CHAR_HEIGHT,
+  };
+}
+
+static box_size_t screen_draw_text_internal(uint16_t x0, uint16_t y0, uint16_t width, const char *text, color_t color, bool draw)
+{
+  box_size_t box = {
+      .w = 0,
+      .h = CHAR_HEIGHT,
+  };
+  uint16_t i = 0;
+  char ch;
+
+  // Those are the current X / Y coordinates we're at
+  uint16_t x = x0, y = y0;
+
+  while ((ch = text[i++]))
+  {
+    // add spacing from previous character
+    if (i > 0)
+      x += CHAR_SPACING;
+
+    box_size_t chbox = draw ? screen_draw_char(x, y, ch, color) : screen_measure_char(ch);
+
+    x += chbox.w;
+
+    // if close to requested box width, wrap to new line
+    if (x >= width)
+    {
+      x = x0;
+      y += FONT_HEIGHT;
+    }
+
+    // Update box with maximum X / Y values
+    int w = (int)x - (int)x0, h = (int)y - (int)y0;
+    if (w > box.w)
+      box.w = w;
+    if (h > box.h)
+      box.h = h;
+  }
+
+  return box;
+}
+
+box_size_t screen_draw_text_fit(uint16_t x, uint16_t y, const char *text, color_t color, uint16_t width)
+{
+  return screen_draw_text_internal(x, y, width, text, color, true);
+}
+box_size_t screen_draw_text(uint16_t x, uint16_t y, const char *text, color_t color)
+{
+  return screen_draw_text_internal(x, y, EINK_WIDTH - x, text, color, true);
+}
+
+box_size_t screen_measure_text_fit(const char *text, uint16_t width)
+{
+  return screen_draw_text_internal(0, 0, width, text, 0, false);
+}
+box_size_t screen_measure_text(const char *text)
+{
+  return screen_draw_text_internal(0, 0, EINK_WIDTH, text, 0, false);
+}
+
+void screen_full_refresh()
+{
+  eink_display((uint8_t *)framebufs[act]);
+}
+void screen_fast_refresh()
+{
+  eink_fast_display((uint8_t *)framebufs[act]);
+}
+void screen_partial_refresh()
+{
+  eink_partial_display((uint8_t *)framebufs[act], 0, 0, EINK_WIDTH, EINK_HEIGHT);
+}
+void screen_partial_refresh_area(box_t area)
+{
+  eink_partial_display((uint8_t *)framebufs[act], area.x, area.y, area.x1, area.y1);
 }
