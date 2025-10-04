@@ -1,10 +1,19 @@
-# my toy operating system
+# PetaPDA
 
-## Hacking
-Run `nix develop` (flakes and nix-command features must be enabled prior to use).
-Then, create build directory with `mkdir build`, cd into it, initialise CMake with `cmake ..`, and finally build the project using `make`.
+Firmware for a custom PDA I'm building, based on the Raspberry Pi Pico board.
 
-You can flash the firmware onto the board by running `sudo picotool load -fux main.bin` (-f forces RPI Zero into BOOTSEL mode for flashing, -u flashes only the sectors that have changed, and -x automatically reboots the board into the flashed program afterwards).
+It's main features are:
+- Microkernel, only manages drivers
+- Fully programmable with lua, code loaded from SD card
+- E-ink display
 
-## compile-commands.json
-The file is initially a broken symlink, but once CMake is ran, it should point to `build/compile_commands.json`.
+# Roadmap
+
+Everything is still on it's early stages, as this is a hobby project :3
+
+Here are some high-level goals:
+- [x] Working screen
+- [x] Working lua interpreter
+- [x] Working filesystem
+- [ ] Design a case
+- [ ] Design a board
