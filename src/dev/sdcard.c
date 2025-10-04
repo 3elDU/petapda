@@ -249,10 +249,14 @@ retry:
 
     uint16_t crc;
     spi_read_blocking(SYS_BUS_PRIMARY_INST, 0xFF, (uint8_t *)&crc, 2); // CRC bytes
+
+    // Swap CRC bytes around because sd card and raspberry pi are different endian
+    crc = (crc >> 8) | (crc << 8);
+
     uint16_t dst_crc = crc16_ccitt(dst + blocks_read * SDCARD_BLOCK_SIZE, SDCARD_BLOCK_SIZE);
     if (crc != dst_crc)
     {
-      printf(" - crc doesn't match, %04x on our side, %04x on card\n", crc, crc16_ccitt(dst + blocks_read * SDCARD_BLOCK_SIZE, SDCARD_BLOCK_SIZE));
+      printf(" - crc doesn't match, %04x received, should be %04x\n", crc, crc16_ccitt(dst + blocks_read * SDCARD_BLOCK_SIZE, SDCARD_BLOCK_SIZE));
       tries++;
       goto retry;
     }

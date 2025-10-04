@@ -27,8 +27,10 @@ add_executable(main
     src/sys/bus.c
     src/dev/sdcard.c
     src/dev/eink.c
+    src/dev/joystick.c
     src/gfx/screen.c
     src/lua/screen.c
+    src/lua/joystick.c
     src/os/fs.c
     src/debug.c
     src/fs/diskio.c
@@ -56,6 +58,7 @@ target_link_libraries(main
     FreeRTOS-Kernel-Heap4
     pico_stdlib
     hardware_spi
+    hardware_adc
     lua_static
 )
 

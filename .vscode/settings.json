@@ -65,7 +65,11 @@
     "newlib.h": "c",
     "memory_resource": "c",
     "memory": "c",
-    "diskio.h": "c"
+    "diskio.h": "c",
+    "time.h": "c",
+    "stdbool.h": "c",
+    "adc.h": "c",
+    "joystick.h": "c"
   },
   "codeium.enableCodeLens": false
 }

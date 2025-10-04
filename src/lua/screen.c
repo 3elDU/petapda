@@ -27,6 +27,13 @@ static int refresh(lua_State *L)
     return 0;
 }
 
+static int set_color(lua_State *L)
+{
+    uint16_t bg = luaL_checkinteger(L, 1);
+    uint16_t fg = luaL_checkinteger(L, 2);
+    screen_set_color(bg, fg);
+}
+
 static int draw_text(lua_State *L)
 {
     const char *text = luaL_checkstring(L, 1);
@@ -49,6 +56,7 @@ static int l_screen_get_height(lua_State *L)
 static const luaL_Reg screenlib[] = {
     {"fill", fill},
     {"set_cursor", l_screen_set_cursor},
+    {"set_color", set_color},
     {"draw_text", draw_text},
     {"refresh", refresh},
     {"get_width", l_screen_get_width},
@@ -65,5 +73,5 @@ static int luaopen_screen(lua_State *L)
 void screen_lua_loadlib(lua_State *L)
 {
     luaL_requiref(L, "screen", luaopen_screen, 1);
-    return;
+    lua_pop(L, 1);
 }

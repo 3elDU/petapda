@@ -294,5 +294,5 @@ void screen_render()
     }
   }
 
-  EPD_4IN2_V2_Display(screenbuf);
+  EPD_4IN2_V2_Display_Fast(screenbuf);
 }

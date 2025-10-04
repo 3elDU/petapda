@@ -1,8 +1,10 @@
 #include <sys/bus.h>
 #include <dev/sdcard.h>
 #include <dev/eink.h>
+#include <dev/joystick.h>
 #include <gfx/screen.h>
 #include <lua/screen.h>
+#include <lua/joystick.h>
 
 #include <pico/printf.h>
 #include <pico/stdlib.h>
@@ -45,6 +47,13 @@ void blink_task(__unused void *params)
   }
 }
 
+static int sleep(lua_State *L)
+{
+  uint32_t ms = luaL_checkinteger(L, 1);
+  sleep_ms(ms);
+  return 0;
+}
+
 void main_task(__unused void *pvParameters)
 {
   FATFS fs;
@@ -72,7 +81,10 @@ void main_task(__unused void *pvParameters)
   // Init only the base and string libraries
   luaL_openlibs(lua);
   screen_lua_loadlib(lua);
-  lua_settop(lua, 0);
+  joystick_lua_loadlib(lua);
+
+  lua_pushcfunction(lua, sleep);
+  lua_setglobal(lua, "sleep");
 
   int err = luaL_dofile(lua, "init.lua");
   if (err)
@@ -134,11 +146,15 @@ int main(void)
   // Initialize devices
   sdcard_init();
   EPD_4IN2_V2_Init();
+  EPD_4IN2_V2_Clear();
+  joystick_init();
 
   sys_bus_go_fullspeed();
 
   screen_init();
   screen_clear();
+
+  EPD_4IN2_V2_Init_Fast(Seconds_1_5S);
 
   vLaunch();
   return 0;
