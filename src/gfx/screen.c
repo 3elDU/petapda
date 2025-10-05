@@ -6,7 +6,7 @@
 #include <stdlib.h>
 
 // 8 bytes can store 8 pixels, so divide width by eight.
-static uint8_t framebufs[2][EINK_HEIGHT][EINK_WIDTH / 8];
+static uint8_t framebufs[1][EINK_HEIGHT][EINK_WIDTH / 8];
 // active framebuffer
 static uint8_t act = 0;
 
@@ -140,7 +140,7 @@ static box_size_t screen_draw_text_internal(uint16_t x0, uint16_t y0, uint16_t w
     x += chbox.w;
 
     // if close to requested box width, wrap to new line
-    if (x >= width)
+    if (x >= x0 + width - CHAR_WIDTH)
     {
       x = x0;
       y += FONT_HEIGHT;
